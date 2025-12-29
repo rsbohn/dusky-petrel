@@ -1,2 +1,5 @@
-﻿// See https://aka.ms/new-console-template for more information
-Console.WriteLine("Hello, World!");
+using Snova;
+
+var cpu = new NovaCpu();
+var monitor = new NovaMonitor(cpu);
+monitor.Run();
