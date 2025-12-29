@@ -298,9 +298,9 @@ public class NovaCpu
         return (short)masked;
     }
 
-    private static string FormatAddress(ushort value) => $"{value:o4}";
+    private static string FormatAddress(ushort value) => Convert.ToString(value, 8).PadLeft(4, '0');
 
-    public static string FormatWord(ushort value) => $"{value:o6}";
+    public static string FormatWord(ushort value) => Convert.ToString(value, 8).PadLeft(6, '0');
 }
 
 public readonly record struct ExecutionStep(

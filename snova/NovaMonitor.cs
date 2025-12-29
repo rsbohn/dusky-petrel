@@ -49,6 +49,7 @@ public class NovaMonitor
         var args = parts.Skip(1).ToArray();
         switch (command)
         {
+            case "q":
             case "quit":
             case "exit":
                 return false;
@@ -67,6 +68,7 @@ public class NovaMonitor
                 Examine(args);
                 break;
             case "deposit":
+            case "dep":
             case "d":
                 Deposit(args);
                 break;
@@ -161,20 +163,35 @@ public class NovaMonitor
         for (var i = 0; i < count; i++)
         {
             var addr = (ushort)(start + i);
-            Console.WriteLine($"{NovaCpu.FormatWord(addr)}: {NovaCpu.FormatWord(_cpu.ReadMemory(addr))}");
+            if (i % 8 == 0)
+            {
+                if (i > 0) Console.WriteLine();
+                Console.Write($"{NovaCpu.FormatWord(addr)}: ");
+            }
+            Console.Write($"{NovaCpu.FormatWord(_cpu.ReadMemory(addr))} ");
         }
+        Console.WriteLine();
     }
 
     private void Deposit(string[] args)
     {
-        if (args.Length < 2 || !TryParseNumber(args[0], out var address) || !TryParseNumber(args[1], out var value))
+        if (args.Length < 2 || !TryParseNumber(args[0], out var address))
         {
-            Console.WriteLine("Usage: deposit <address> <value>");
+            Console.WriteLine("Usage: deposit <address> <value> [value2 ...]");
             return;
         }
 
-        _cpu.WriteMemory(address, value);
-        Console.WriteLine($"[{NovaCpu.FormatWord(address)}] <= {NovaCpu.FormatWord(value)}");
+        for (var i = 1; i < args.Length; i++)
+        {
+            if (!TryParseNumber(args[i], out var value))
+            {
+                Console.WriteLine($"Invalid value: {args[i]}");
+                return;
+            }
+            var addr = (ushort)(address + i - 1);
+            _cpu.WriteMemory(addr, value);
+            Console.WriteLine($"[{NovaCpu.FormatWord(addr)}] <= {NovaCpu.FormatWord(value)}");
+        }
     }
 
     private void Step(string[] args)
