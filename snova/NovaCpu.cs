@@ -19,6 +19,7 @@ public class NovaCpu
     public ushort ProgramCounter { get; private set; }
     public bool Link { get; private set; }
     public bool Halted { get; private set; }
+    public NovaIoBus IoBus { get; } = new();
 
     public ReadOnlyCollection<ushort> Memory => Array.AsReadOnly(_memory);
 
@@ -35,6 +36,10 @@ public class NovaCpu
 
     public void WriteMemory(ushort address, ushort value) => _memory[address & AddressMask] = value;
 
+    public void SetProgramCounter(ushort address) => ProgramCounter = (ushort)(address & AddressMask);
+
+    public void RegisterDevice(INovaIoDevice device) => IoBus.RegisterDevice(device);
+
     public ExecutionStep Step()
     {
         if (Halted)
@@ -44,7 +49,12 @@ public class NovaCpu
 
         var instructionAddress = ProgramCounter;
         var instruction = Fetch();
-        var opcode = (Instruction) (instruction >> 12);
+        if (IsIoInstruction(instruction))
+        {
+            return ExecuteIo(instruction, instructionAddress);
+        }
+
+        var opcode = (Instruction)(instruction >> 12);
         var accumulator = (instruction >> 10) & 0x3;
         var indirect = (instruction & 0x200) != 0;
         var page = (instruction & 0x100) != 0;
@@ -267,6 +277,120 @@ public class NovaCpu
         var value = _memory[ProgramCounter];
         ProgramCounter = (ushort)((ProgramCounter + 1) & AddressMask);
         return value;
+    }
+
+    private ExecutionStep ExecuteIo(ushort instruction, ushort instructionAddress)
+    {
+        var io = DecodeIo(instruction);
+        var description = FormatIoDescription(io);
+        var skip = false;
+        var tookBranch = false;
+        var handled = false;
+
+        ushort accumulatorValue = 0;
+        var usesAccumulator = io.Kind is NovaIoOpKind.DIA or NovaIoOpKind.DIB or NovaIoOpKind.DIC
+            or NovaIoOpKind.DOA or NovaIoOpKind.DOB or NovaIoOpKind.DOC;
+        if (usesAccumulator)
+        {
+            accumulatorValue = Accumulators[io.Ac];
+        }
+
+        handled = IoBus.TryExecute(io, ref accumulatorValue, out skip);
+        if (handled && usesAccumulator)
+        {
+            Accumulators[io.Ac] = (ushort)(accumulatorValue & WordMask);
+        }
+
+        if (skip)
+        {
+            ProgramCounter = (ushort)((ProgramCounter + 1) & AddressMask);
+            tookBranch = true;
+        }
+
+        if (!handled)
+        {
+            description += " (unassigned)";
+        }
+
+        return new ExecutionStep(instructionAddress, instruction, description, Halted, tookBranch)
+        {
+            AccumulatorIndex = usesAccumulator ? io.Ac : 0,
+            Link = Link
+        };
+    }
+
+    private static bool IsIoInstruction(ushort instruction) => (instruction & 0xE000) == 0x6000;
+
+    private static NovaIoOp DecodeIo(ushort instruction)
+    {
+        var signal = (instruction >> 11) & 0x3;
+        var function = (instruction >> 8) & 0x7;
+        var ac = (instruction >> 6) & 0x3;
+        var device = instruction & 0x3F;
+
+        var start = signal == 1;
+        var clear = signal == 2;
+        var pulse = signal == 3;
+
+        var kind = function switch
+        {
+            0 => NovaIoOpKind.NIO,
+            1 => NovaIoOpKind.DIA,
+            2 => NovaIoOpKind.DOA,
+            3 => NovaIoOpKind.DIB,
+            4 => NovaIoOpKind.DOB,
+            5 => NovaIoOpKind.DIC,
+            6 => NovaIoOpKind.DOC,
+            _ => ac switch
+            {
+                0 => NovaIoOpKind.SKPBN,
+                1 => NovaIoOpKind.SKPBZ,
+                2 => NovaIoOpKind.SKPDN,
+                _ => NovaIoOpKind.SKPDZ
+            }
+        };
+
+        return new NovaIoOp(kind, device, ac, start, clear, pulse);
+    }
+
+    private static string FormatIoDescription(NovaIoOp op)
+    {
+        var device = Convert.ToString(op.DeviceCode, 8).PadLeft(2, '0');
+        return op.Kind switch
+        {
+            NovaIoOpKind.DIA => $"DIA AC{op.Ac}, {device}",
+            NovaIoOpKind.DOA => $"DOA AC{op.Ac}, {device}",
+            NovaIoOpKind.DIB => $"DIB AC{op.Ac}, {device}",
+            NovaIoOpKind.DOB => $"DOB AC{op.Ac}, {device}",
+            NovaIoOpKind.DIC => $"DIC AC{op.Ac}, {device}",
+            NovaIoOpKind.DOC => $"DOC AC{op.Ac}, {device}",
+            NovaIoOpKind.NIO => $"NIO {FormatSignal(op)}{device}",
+            NovaIoOpKind.SKPBN => $"SKPBN {device}",
+            NovaIoOpKind.SKPBZ => $"SKPBZ {device}",
+            NovaIoOpKind.SKPDN => $"SKPDN {device}",
+            NovaIoOpKind.SKPDZ => $"SKPDZ {device}",
+            _ => $"IO {device}"
+        };
+    }
+
+    private static string FormatSignal(NovaIoOp op)
+    {
+        if (op.Start)
+        {
+            return "S, ";
+        }
+
+        if (op.Clear)
+        {
+            return "C, ";
+        }
+
+        if (op.Pulse)
+        {
+            return "P, ";
+        }
+
+        return string.Empty;
     }
 
     private static (ushort Result, bool Carry) AddWithCarry(ushort left, ushort right, bool link)

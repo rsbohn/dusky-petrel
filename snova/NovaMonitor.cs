@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Text;
 
 namespace Snova;
@@ -7,12 +8,14 @@ namespace Snova;
 public class NovaMonitor
 {
     private readonly NovaCpu _cpu;
+    private readonly NovaConsoleTty? _tty;
     private readonly HashSet<ushort> _breakpoints = new();
     private readonly Dictionary<string, string> _helpText;
 
-    public NovaMonitor(NovaCpu cpu)
+    public NovaMonitor(NovaCpu cpu, NovaConsoleTty? tty = null)
     {
         _cpu = cpu;
+        _tty = tty;
         _cpu.Reset();
         _helpText = BuildHelp();
     }
@@ -91,6 +94,13 @@ public class NovaMonitor
                 break;
             case "sample":
                 LoadSample();
+                break;
+            case "tty":
+                HandleTty(args);
+                break;
+            case "asm":
+            case "assemble":
+                AssembleFileCommand(args);
                 break;
             default:
                 Console.WriteLine($"Unknown command '{command}'. Type 'help' for options.");
@@ -318,6 +328,108 @@ public class NovaMonitor
         Console.WriteLine("Sample program loaded at 0200. Use 'run' or 'step' to execute.");
     }
 
+    private void HandleTty(string[] args)
+    {
+        if (_tty is null)
+        {
+            Console.WriteLine("TTY device not configured.");
+            return;
+        }
+
+        if (args.Length < 1)
+        {
+            Console.WriteLine("Usage: tty read <filename>");
+            return;
+        }
+
+        var subcommand = args[0].ToLowerInvariant();
+        switch (subcommand)
+        {
+            case "read":
+                if (args.Length < 2)
+                {
+                    Console.WriteLine("Usage: tty read <filename>");
+                    return;
+                }
+
+                var path = args[1];
+                if (!File.Exists(path))
+                {
+                    Console.WriteLine($"File not found: {path}");
+                    return;
+                }
+
+                try
+                {
+                    _tty.EnqueueInputFile(path, appendEof: true);
+                    Console.WriteLine($"Queued {_tty.PendingInput} byte(s) for TTI (EOF appended).");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"TTY read failed: {ex.Message}");
+                }
+                break;
+            default:
+                Console.WriteLine($"Unknown tty command '{subcommand}'.");
+                break;
+        }
+    }
+
+    private void AssembleFileCommand(string[] args)
+    {
+        if (args.Length == 0)
+        {
+            Console.WriteLine("Usage: asm <filename> [start]");
+            return;
+        }
+
+        var path = args[0];
+        if (!File.Exists(path))
+        {
+            Console.WriteLine($"File not found: {path}");
+            return;
+        }
+
+        var assembler = new NovaAssembler();
+        AssemblerResult result;
+        try
+        {
+            result = assembler.AssembleFile(path);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Assembly failed: {ex.Message}");
+            return;
+        }
+
+        if (!result.Success)
+        {
+            Console.WriteLine("Assembly failed:");
+            foreach (var diag in result.Diagnostics)
+            {
+                Console.WriteLine($"  line {diag.LineNumber}: {diag.Message}");
+            }
+
+            return;
+        }
+
+        foreach (var word in result.Words)
+        {
+            _cpu.WriteMemory(word.Address, word.Value);
+        }
+
+        if (args.Length > 1 && TryParseNumber(args[1], out var start))
+        {
+            _cpu.SetProgramCounter(start);
+        }
+        else if (result.StartAddress.HasValue)
+        {
+            _cpu.SetProgramCounter(result.StartAddress.Value);
+        }
+
+        Console.WriteLine($"Assembled {result.Words.Count} word(s). PC={NovaCpu.FormatWord(_cpu.ProgramCounter)}");
+    }
+
     private ushort EncodeImmediate(Instruction opcode, int accumulator, int value)
     {
         return (ushort)(((int)opcode << 12) | (accumulator << 10) | (value & 0xFF));
@@ -349,6 +461,11 @@ public class NovaMonitor
 
     private string DisassembleWord(ushort address, ushort instruction)
     {
+        if ((instruction & 0xE000) == 0x6000)
+        {
+            return FormatInstruction(address, instruction, DisassembleIo(instruction));
+        }
+
         var opcode = (Instruction)(instruction >> 12);
         var accumulator = (instruction >> 10) & 0x3;
         var indirect = (instruction & 0x200) != 0;
@@ -373,6 +490,32 @@ public class NovaMonitor
             Instruction.IncSkip => FormatInstruction(address, instruction, $"ISZ {FormatEffective(address, page, indirect, offset)}"),
             Instruction.Halt => FormatInstruction(address, instruction, "HALT"),
             _ => FormatInstruction(address, instruction, $"DW {NovaCpu.FormatWord(instruction)}")
+        };
+    }
+
+    private string DisassembleIo(ushort instruction)
+    {
+        var signal = (instruction >> 11) & 0x3;
+        var function = (instruction >> 8) & 0x7;
+        var ac = (instruction >> 6) & 0x3;
+        var device = instruction & 0x3F;
+        var deviceText = Convert.ToString(device, 8).PadLeft(2, '0');
+        return function switch
+        {
+            0 => $"NIO {FormatSignal(signal)}{deviceText}",
+            1 => $"DIA AC{ac}, {deviceText}",
+            2 => $"DOA AC{ac}, {deviceText}",
+            3 => $"DIB AC{ac}, {deviceText}",
+            4 => $"DOB AC{ac}, {deviceText}",
+            5 => $"DIC AC{ac}, {deviceText}",
+            6 => $"DOC AC{ac}, {deviceText}",
+            _ => ac switch
+            {
+                0 => $"SKPBN {deviceText}",
+                1 => $"SKPBZ {deviceText}",
+                2 => $"SKPDN {deviceText}",
+                _ => $"SKPDZ {deviceText}"
+            }
         };
     }
 
@@ -448,7 +591,20 @@ public class NovaMonitor
             ["breaks"] = "breaks              List breakpoints",
             ["dis"] = "dis <addr> [n]       Disassemble n words from addr",
             ["sample"] = "sample               Load a small counting demo at 0200",
+            ["asm"] = "asm <file> [addr]    Assemble file and load into memory",
+            ["tty"] = "tty read <file>      Queue input bytes for console TTI",
             ["exit"] = "exit                 Quit the monitor"
+        };
+    }
+
+    private static string FormatSignal(int signal)
+    {
+        return signal switch
+        {
+            1 => "S, ",
+            2 => "C, ",
+            3 => "P, ",
+            _ => string.Empty
         };
     }
 }
