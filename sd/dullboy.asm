@@ -5,6 +5,7 @@ INIT:   LDA AC1, STRPTR
 
 LOOP:   LDA AC0, @PTR
         DOA TTO
+        JSR 3, BUSY
         LDA AC1, PTR
         LDAI AC3, 0
         ADDI AC1, 1
@@ -14,6 +15,25 @@ LOOP:   LDA AC0, @PTR
         SUB AC2, ENDADDR
         BZ AC2, INIT
         BR LOOP
+
+; ------------------------------------------------------------
+; BUSY — short delay loop
+; Consumes time between characters.
+; AC0 is used as the loop counter and is not preserved.
+; ------------------------------------------------------------
+
+BUSY:
+        STA     3, RETADR        ; save return address from AC3
+        LDAI    0, 0             ; clear LINK for countdown math
+        LDA     0, DELAY         ; load delay constant
+BUSY1:  SUB     0, ONE           ; count down
+        BNZ     0, BUSY1         ; loop until zero
+        BR      @RETADR          ; return via saved AC3
+
+; Tunable delay constant
+DELAY:  .WORD   03000             ; adjust to taste
+ONE:    DW 1
+RETADR: DW 0
 
 PTR:    DW 0
 STRPTR: DW STR

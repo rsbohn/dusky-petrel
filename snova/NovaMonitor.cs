@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace Snova;
@@ -9,14 +10,17 @@ public class NovaMonitor
 {
     private readonly NovaCpu _cpu;
     private readonly NovaConsoleTty? _tty;
+    private readonly NovaWatchdogDevice? _watchdog;
     private readonly HashSet<ushort> _breakpoints = new();
     private readonly Dictionary<string, string> _helpText;
 
-    public NovaMonitor(NovaCpu cpu, NovaConsoleTty? tty = null)
+    public NovaMonitor(NovaCpu cpu, NovaConsoleTty? tty = null, NovaWatchdogDevice? watchdog = null)
     {
         _cpu = cpu;
         _tty = tty;
+        _watchdog = watchdog;
         _cpu.Reset();
+        _watchdog?.ResetDeviceState();
         _helpText = BuildHelp();
     }
 
@@ -98,6 +102,9 @@ public class NovaMonitor
             case "tty":
                 HandleTty(args);
                 break;
+            case "wdt":
+                HandleWatchdog(args);
+                break;
             case "asm":
             case "assemble":
                 AssembleFileCommand(args);
@@ -140,6 +147,7 @@ public class NovaMonitor
             ? parsed
             : (ushort)0;
         _cpu.Reset(start);
+        _watchdog?.ResetDeviceState();
         _breakpoints.Clear();
         Console.WriteLine($"CPU reset. PC={NovaCpu.FormatWord(_cpu.ProgramCounter)}");
     }
@@ -210,6 +218,11 @@ public class NovaMonitor
             ? parsed
             : (ushort)1;
 
+        if (_cpu.Halted)
+        {
+            _cpu.Resume();
+        }
+
         for (var i = 0; i < count; i++)
         {
             var step = _cpu.Step();
@@ -231,6 +244,10 @@ public class NovaMonitor
     {
         var maxSteps = args.Length > 0 && int.TryParse(args[0], out var parsed) ? parsed : int.MaxValue;
         var executed = 0;
+        if (_cpu.Halted)
+        {
+            _cpu.Resume();
+        }
         while (!_cpu.Halted && executed < maxSteps)
         {
             if (_breakpoints.Contains(_cpu.ProgramCounter))
@@ -248,7 +265,8 @@ public class NovaMonitor
             }
         }
 
-        Console.WriteLine($"Stopped after {executed} step(s). PC={NovaCpu.FormatWord(_cpu.ProgramCounter)} HALT={_cpu.Halted}");
+        var haltReason = string.IsNullOrWhiteSpace(_cpu.HaltReason) ? string.Empty : $" ({_cpu.HaltReason})";
+        Console.WriteLine($"Stopped after {executed} step(s). PC={NovaCpu.FormatWord(_cpu.ProgramCounter)} HALT={_cpu.Halted}{haltReason}");
     }
 
     private void ToggleBreakpoint(string[] args)
@@ -390,6 +408,8 @@ public class NovaMonitor
             return;
         }
 
+        var fingerprint = ComputeMd5(path);
+
         var assembler = new NovaAssembler();
         AssemblerResult result;
         try
@@ -427,7 +447,113 @@ public class NovaMonitor
             _cpu.SetProgramCounter(result.StartAddress.Value);
         }
 
-        Console.WriteLine($"Assembled {result.Words.Count} word(s). PC={NovaCpu.FormatWord(_cpu.ProgramCounter)}");
+        Console.WriteLine($"Assembled {result.Words.Count} word(s). PC={NovaCpu.FormatWord(_cpu.ProgramCounter)} MD5={fingerprint}");
+    }
+
+    private void HandleWatchdog(string[] args)
+    {
+        if (_watchdog is null)
+        {
+            Console.WriteLine("Watchdog device not configured.");
+            return;
+        }
+
+        if (args.Length == 0)
+        {
+            Console.WriteLine("Usage: wdt <status|host|enable|disable|timeout|repeat|action|arm|disarm|pet|clear|fire>");
+            return;
+        }
+
+        var subcommand = args[0].ToLowerInvariant();
+        switch (subcommand)
+        {
+            case "status":
+                ShowWatchdogStatus();
+                break;
+            case "host":
+                if (args.Length < 2)
+                {
+                    Console.WriteLine("Usage: wdt host <on|off>");
+                    return;
+                }
+                if (!TryParseOnOff(args[1], out var hostEnabled))
+                {
+                    Console.WriteLine("Usage: wdt host <on|off>");
+                    return;
+                }
+                _watchdog.SetHostEnabled(hostEnabled);
+                Console.WriteLine($"Watchdog host enabled: {hostEnabled}");
+                break;
+            case "enable":
+                _watchdog.SetHostEnabled(true);
+                _watchdog.SetEnabled(true);
+                _watchdog.Arm();
+                Console.WriteLine("Watchdog enabled and armed.");
+                break;
+            case "disable":
+                _watchdog.SetEnabled(false);
+                _watchdog.Clear();
+                Console.WriteLine("Watchdog disabled.");
+                break;
+            case "timeout":
+                if (args.Length < 2 || !TryParseMs(args[1], out var timeout))
+                {
+                    Console.WriteLine("Usage: wdt timeout <ms>");
+                    return;
+                }
+                _watchdog.SetTimeoutMs(timeout);
+                Console.WriteLine($"Watchdog timeout set to {timeout} ms.");
+                break;
+            case "repeat":
+                if (args.Length < 2 || !TryParseOnOff(args[1], out var repeat))
+                {
+                    Console.WriteLine("Usage: wdt repeat <on|off>");
+                    return;
+                }
+                _watchdog.SetRepeat(repeat);
+                Console.WriteLine($"Watchdog repeat: {repeat}");
+                break;
+            case "action":
+                if (args.Length < 2 || !TryParseAction(args[1], out var action))
+                {
+                    Console.WriteLine("Usage: wdt action <none|interrupt|halt|reset>");
+                    return;
+                }
+                _watchdog.SetAction(action);
+                Console.WriteLine($"Watchdog action: {action}");
+                break;
+            case "arm":
+                _watchdog.Arm();
+                Console.WriteLine("Watchdog armed.");
+                break;
+            case "disarm":
+                _watchdog.Clear();
+                Console.WriteLine("Watchdog disarmed and cleared.");
+                break;
+            case "pet":
+                _watchdog.Pet();
+                Console.WriteLine("Watchdog petted.");
+                break;
+            case "clear":
+                _watchdog.ClearFired();
+                Console.WriteLine("Watchdog fired state cleared.");
+                break;
+            case "fire":
+                _watchdog.ForceFire();
+                Console.WriteLine("Watchdog fired.");
+                break;
+            default:
+                Console.WriteLine($"Unknown wdt command '{subcommand}'.");
+                break;
+        }
+    }
+
+    private void ShowWatchdogStatus()
+    {
+        var status = _watchdog!.GetStatus();
+        Console.WriteLine($"WDT device: {Convert.ToString(status.DeviceCode, 8).PadLeft(2, '0')}");
+        Console.WriteLine($"host={status.HostEnabled} enable={status.Enabled} active={status.Active} fired={status.Fired}");
+        Console.WriteLine($"repeat={status.Repeat} action={status.Action} timeout_ms={status.TimeoutMs}");
     }
 
     private ushort EncodeImmediate(Instruction opcode, int accumulator, int value)
@@ -484,7 +610,7 @@ public class NovaMonitor
             Instruction.Shift => FormatInstruction(address, instruction, $"SHFT AC{accumulator}, {(indirect ? "R" : "L")}{offset & 0xF}{((offset & 0x20) != 0 ? "L" : string.Empty)}"),
             Instruction.AddImmediate => FormatInstruction(address, instruction, $"ADDI AC{accumulator}, {NovaCpu.FormatWord(offset)}"),
             Instruction.Branch => FormatInstruction(address, instruction, $"BR {FormatEffective(address, page, indirect, offset)}"),
-            Instruction.ConditionalBranch => FormatInstruction(address, instruction, $"B{(indirect ? "NZ" : "Z")} AC{accumulator}, {FormatEffective(address, page, indirect, offset)}"),
+            Instruction.ConditionalBranch => FormatInstruction(address, instruction, $"B{(indirect ? "NZ" : "Z")} AC{accumulator}, {FormatEffective(address, page, false, offset)}"),
             Instruction.JumpToSubroutine => FormatInstruction(address, instruction, $"JSR AC{accumulator}, {FormatEffective(address, page, indirect, offset)}"),
             Instruction.LoadImmediate => FormatInstruction(address, instruction, $"LDAI AC{accumulator}, {NovaCpu.FormatWord(offset)}"),
             Instruction.IncSkip => FormatInstruction(address, instruction, $"ISZ {FormatEffective(address, page, indirect, offset)}"),
@@ -593,8 +719,98 @@ public class NovaMonitor
             ["sample"] = "sample               Load a small counting demo at 0200",
             ["asm"] = "asm <file> [addr]    Assemble file and load into memory",
             ["tty"] = "tty read <file>      Queue input bytes for console TTI",
+            ["wdt"] = "wdt <cmd> [args]     Configure watchdog timer",
             ["exit"] = "exit                 Quit the monitor"
         };
+    }
+
+    private static bool TryParseOnOff(string text, out bool value)
+    {
+        if (text.Equals("on", StringComparison.OrdinalIgnoreCase) ||
+            text.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+            text.Equals("1", StringComparison.OrdinalIgnoreCase))
+        {
+            value = true;
+            return true;
+        }
+
+        if (text.Equals("off", StringComparison.OrdinalIgnoreCase) ||
+            text.Equals("false", StringComparison.OrdinalIgnoreCase) ||
+            text.Equals("0", StringComparison.OrdinalIgnoreCase))
+        {
+            value = false;
+            return true;
+        }
+
+        value = false;
+        return false;
+    }
+
+    private static bool TryParseAction(string text, out NovaWatchdogAction action)
+    {
+        if (text.Equals("none", StringComparison.OrdinalIgnoreCase))
+        {
+            action = NovaWatchdogAction.None;
+            return true;
+        }
+
+        if (text.Equals("interrupt", StringComparison.OrdinalIgnoreCase))
+        {
+            action = NovaWatchdogAction.Interrupt;
+            return true;
+        }
+
+        if (text.Equals("halt", StringComparison.OrdinalIgnoreCase))
+        {
+            action = NovaWatchdogAction.Halt;
+            return true;
+        }
+
+        if (text.Equals("reset", StringComparison.OrdinalIgnoreCase))
+        {
+            action = NovaWatchdogAction.Reset;
+            return true;
+        }
+
+        action = NovaWatchdogAction.None;
+        return false;
+    }
+
+    private static bool TryParseMs(string text, out int value)
+    {
+        text = text.Trim();
+        int radix;
+        if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            radix = 16;
+            text = text[2..];
+        }
+        else if (text.StartsWith("0o", StringComparison.OrdinalIgnoreCase))
+        {
+            radix = 8;
+            text = text[2..];
+        }
+        else if (text.StartsWith("0b", StringComparison.OrdinalIgnoreCase))
+        {
+            radix = 2;
+            text = text[2..];
+        }
+        else
+        {
+            radix = 10;
+        }
+
+        try
+        {
+            var parsed = Convert.ToInt32(text, radix);
+            value = parsed;
+            return parsed >= 0 && parsed <= 0xFFFF;
+        }
+        catch
+        {
+            value = 0;
+            return false;
+        }
     }
 
     private static string FormatSignal(int signal)
@@ -606,5 +822,12 @@ public class NovaMonitor
             3 => "P, ",
             _ => string.Empty
         };
+    }
+
+    private static string ComputeMd5(string path)
+    {
+        using var stream = File.OpenRead(path);
+        var hash = MD5.HashData(stream);
+        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 }

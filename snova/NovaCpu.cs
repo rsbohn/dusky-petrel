@@ -19,6 +19,7 @@ public class NovaCpu
     public ushort ProgramCounter { get; private set; }
     public bool Link { get; private set; }
     public bool Halted { get; private set; }
+    public string? HaltReason { get; private set; }
     public NovaIoBus IoBus { get; } = new();
 
     public ReadOnlyCollection<ushort> Memory => Array.AsReadOnly(_memory);
@@ -30,6 +31,19 @@ public class NovaCpu
         ProgramCounter = startAddress;
         Link = false;
         Halted = false;
+        HaltReason = null;
+    }
+
+    public void Halt(string? reason = null)
+    {
+        Halted = true;
+        HaltReason = reason;
+    }
+
+    public void Resume()
+    {
+        Halted = false;
+        HaltReason = null;
     }
 
     public ushort ReadMemory(ushort address) => _memory[address & AddressMask];
@@ -44,7 +58,8 @@ public class NovaCpu
     {
         if (Halted)
         {
-            return new ExecutionStep(ProgramCounter, 0, "CPU halted", true, false);
+            var reason = string.IsNullOrWhiteSpace(HaltReason) ? string.Empty : $" ({HaltReason})";
+            return new ExecutionStep(ProgramCounter, 0, $"CPU halted{reason}", true, false);
         }
 
         var instructionAddress = ProgramCounter;
@@ -68,10 +83,16 @@ public class NovaCpu
             var ea = (ushort)((baseAddress | offset) & AddressMask);
             if (indirect)
             {
-                ea = ReadMemory(ea);
+                ea = (ushort)(ReadMemory(ea) & AddressMask);
             }
 
             return ea;
+        }
+
+        ushort DirectAddress()
+        {
+            var baseAddress = page ? (ushort)(ProgramCounter & PageMask) : (ushort)0;
+            return (ushort)((baseAddress | offset) & AddressMask);
         }
 
         switch (opcode)
@@ -208,7 +229,7 @@ public class NovaCpu
                 break;
             case Instruction.ConditionalBranch:
                 {
-                    var ea = EffectiveAddress();
+                    var ea = DirectAddress();
                     var targetAcc = Accumulators[accumulator];
                     var shouldBranch = indirect ? !IsZero(targetAcc) : IsZero(targetAcc);
                     if (shouldBranch)
@@ -257,11 +278,11 @@ public class NovaCpu
                 break;
             case Instruction.Halt:
                 description = "HALT";
-                Halted = true;
+                Halt("HALT instruction");
                 break;
             default:
                 description = $"Unknown opcode {opcode} (halting)";
-                Halted = true;
+                Halt("Unknown opcode");
                 break;
         }
 
@@ -274,7 +295,7 @@ public class NovaCpu
 
     private ushort Fetch()
     {
-        var value = _memory[ProgramCounter];
+        var value = _memory[ProgramCounter & AddressMask];
         ProgramCounter = (ushort)((ProgramCounter + 1) & AddressMask);
         return value;
     }
