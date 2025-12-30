@@ -3,9 +3,12 @@ using Snova;
 var cpu = new NovaCpu();
 var tty = new NovaConsoleTty();
 var watchdog = new NovaWatchdogDevice(cpu);
+var tc08 = new Tc08();
+var tc08Device = new NovaTc08Device(cpu, tc08);
 cpu.RegisterDevice(tty.InputDevice);
 cpu.RegisterDevice(tty.OutputDevice);
 cpu.RegisterDevice(watchdog);
+cpu.RegisterDevice(tc08Device);
 
 Console.CancelKeyPress += (_, e) =>
 {
@@ -15,5 +18,5 @@ Console.CancelKeyPress += (_, e) =>
     Console.WriteLine("Break: CPU halted.");
 };
 
-var monitor = new NovaMonitor(cpu, tty, watchdog);
+var monitor = new NovaMonitor(cpu, tty, watchdog, tc08);
 monitor.Run();

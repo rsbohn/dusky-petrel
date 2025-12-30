@@ -17,22 +17,20 @@ LOOP:   LDA AC0, @PTR
         BR LOOP
 
 ; ------------------------------------------------------------
-; BUSY — short delay loop
-; Consumes time between characters.
-; AC0 is used as the loop counter and is not preserved.
+; BUSY — slow-memory delay
+; Consumes time between characters by reading slow memory.
+; AC0 is clobbered.
 ; ------------------------------------------------------------
 
 BUSY:
         STA     3, RETADR        ; save return address from AC3
-        LDAI    0, 0             ; clear LINK for countdown math
-        LDA     0, DELAY         ; load delay constant
-BUSY1:  SUB     0, ONE           ; count down
-        BNZ     0, BUSY1         ; loop until zero
+        LDA     0, @SLOWMEM       ; 100 ms read from slow-memory bank
+        ;STA     0, SLOWMEM
+        ;LDA     0, SLOWMEM
+        ;STA     0, SLOWMEM
         BR      @RETADR          ; return via saved AC3
 
-; Tunable delay constant
-DELAY:  .WORD   03000             ; adjust to taste
-ONE:    DW 1
+SLOWMEM: .WORD  0o77760
 RETADR: DW 0
 
 PTR:    DW 0

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Threading;
 
 namespace Snova;
 
@@ -12,6 +13,9 @@ public class NovaCpu
     public const int AddressMask = 0x7FFF; // 15-bit addressing
     public const int PageMask = 0xFF00;
     public const int OffsetMask = 0x00FF;
+    private const ushort SlowMemoryBase = 0x7FF0; // 0o77760
+    private const int SlowMemoryCount = 8;
+    private const int SlowMemoryDelayMs = 100;
 
     private readonly ushort[] _memory = new ushort[1 << 15]; // 32K words.
 
@@ -46,9 +50,23 @@ public class NovaCpu
         HaltReason = null;
     }
 
-    public ushort ReadMemory(ushort address) => _memory[address & AddressMask];
+    public ushort ReadMemory(ushort address)
+    {
+        var masked = (ushort)(address & AddressMask);
+        if (IsSlowMemoryAddress(masked))
+        {
+            Thread.Sleep(SlowMemoryDelayMs);
+        }
+
+        return _memory[masked];
+    }
 
     public void WriteMemory(ushort address, ushort value) => _memory[address & AddressMask] = value;
+
+    private static bool IsSlowMemoryAddress(ushort address)
+    {
+        return address >= SlowMemoryBase && address < SlowMemoryBase + SlowMemoryCount;
+    }
 
     public void SetProgramCounter(ushort address) => ProgramCounter = (ushort)(address & AddressMask);
 
@@ -295,7 +313,7 @@ public class NovaCpu
 
     private ushort Fetch()
     {
-        var value = _memory[ProgramCounter & AddressMask];
+        var value = ReadMemory(ProgramCounter);
         ProgramCounter = (ushort)((ProgramCounter + 1) & AddressMask);
         return value;
     }

@@ -11,14 +11,20 @@ public class NovaMonitor
     private readonly NovaCpu _cpu;
     private readonly NovaConsoleTty? _tty;
     private readonly NovaWatchdogDevice? _watchdog;
+    private readonly Tc08? _tc08;
     private readonly HashSet<ushort> _breakpoints = new();
     private readonly Dictionary<string, string> _helpText;
 
-    public NovaMonitor(NovaCpu cpu, NovaConsoleTty? tty = null, NovaWatchdogDevice? watchdog = null)
+    public NovaMonitor(
+        NovaCpu cpu,
+        NovaConsoleTty? tty = null,
+        NovaWatchdogDevice? watchdog = null,
+        Tc08? tc08 = null)
     {
         _cpu = cpu;
         _tty = tty;
         _watchdog = watchdog;
+        _tc08 = tc08;
         _cpu.Reset();
         _watchdog?.ResetDeviceState();
         _helpText = BuildHelp();
@@ -85,6 +91,18 @@ public class NovaMonitor
                 break;
             case "run":
                 RunUntilHalt(args);
+                break;
+            case "go":
+                RunFromAddress(args);
+                break;
+            case "tc":
+                HandleTc(args);
+                break;
+            case "tc0":
+                HandleTcUnit(0, args);
+                break;
+            case "tc1":
+                HandleTcUnit(1, args);
                 break;
             case "break":
             case "b":
@@ -242,7 +260,25 @@ public class NovaMonitor
 
     private void RunUntilHalt(string[] args)
     {
-        var maxSteps = args.Length > 0 && int.TryParse(args[0], out var parsed) ? parsed : int.MaxValue;
+        var maxSteps = ParseStepLimit(args, 0);
+        RunUntilHalt(maxSteps);
+    }
+
+    private void RunFromAddress(string[] args)
+    {
+        if (args.Length == 0 || !TryParseNumber(args[0], out var start))
+        {
+            Console.WriteLine("Usage: go <addr> [n]");
+            return;
+        }
+
+        _cpu.SetProgramCounter(start);
+        var maxSteps = ParseStepLimit(args, 1);
+        RunUntilHalt(maxSteps);
+    }
+
+    private void RunUntilHalt(int maxSteps)
+    {
         var executed = 0;
         if (_cpu.Halted)
         {
@@ -269,6 +305,16 @@ public class NovaMonitor
         Console.WriteLine($"Stopped after {executed} step(s). PC={NovaCpu.FormatWord(_cpu.ProgramCounter)} HALT={_cpu.Halted}{haltReason}");
     }
 
+    private static int ParseStepLimit(string[] args, int index)
+    {
+        if (args.Length > index && int.TryParse(args[index], out var parsed))
+        {
+            return parsed;
+        }
+
+        return int.MaxValue;
+    }
+
     private void ToggleBreakpoint(string[] args)
     {
         if (args.Length == 0 || !TryParseNumber(args[0], out var address))
@@ -286,6 +332,180 @@ public class NovaMonitor
             _breakpoints.Add(address);
             Console.WriteLine($"Breakpoint set at {NovaCpu.FormatWord(address)}");
         }
+    }
+
+    private void HandleTc(string[] args)
+    {
+        if (_tc08 is null)
+        {
+            Console.WriteLine("TC08 not configured.");
+            return;
+        }
+
+        if (args.Length == 0)
+        {
+            Console.WriteLine("Usage: tc <status>");
+            return;
+        }
+
+        var command = args[0].ToLowerInvariant();
+        if (command == "status")
+        {
+            ShowTcStatus();
+            return;
+        }
+
+        Console.WriteLine("Usage: tc status");
+    }
+
+    private void HandleTcUnit(int unit, string[] args)
+    {
+        if (_tc08 is null)
+        {
+            Console.WriteLine("TC08 not configured.");
+            return;
+        }
+
+        if (args.Length == 0)
+        {
+            Console.WriteLine("Usage: tc0 <attach|read|write|verify> ...");
+            return;
+        }
+
+        var command = args[0].ToLowerInvariant();
+        switch (command)
+        {
+            case "att":
+            case "attach":
+                HandleTcAttach(unit, args.Skip(1).ToArray());
+                return;
+            case "read":
+                HandleTcRead(unit, args.Skip(1).ToArray());
+                return;
+            case "write":
+                HandleTcWrite(unit, args.Skip(1).ToArray());
+                return;
+            case "verify":
+                HandleTcVerify(unit, args.Skip(1).ToArray());
+                return;
+        }
+
+        Console.WriteLine($"Usage: tc{unit} <attach|read|write|verify> ...");
+    }
+
+    private void ShowTcStatus()
+    {
+        for (var i = 0; i < Tc08.DriveCount; i++)
+        {
+            var status = _tc08!.GetDriveStatus(i);
+            var attached = status.Attached ? "attached" : "detached";
+            var detail = status.Attached ? $"{status.Path} ({status.SizeBytes} bytes)" : "no media";
+            Console.WriteLine($"TC{i}: {attached} - {detail}");
+        }
+    }
+
+    private void HandleTcAttach(int unit, string[] args)
+    {
+        if (args.Length < 1)
+        {
+            Console.WriteLine($"Usage: tc{unit} attach <path> [new]");
+            return;
+        }
+
+        var path = args[0];
+        var create = args.Length > 1 && args[1].Equals("new", StringComparison.OrdinalIgnoreCase);
+        if (_tc08!.Attach(unit, path, create, out var error))
+        {
+            Console.WriteLine($"TC{unit}: attached {path}");
+            return;
+        }
+
+        Console.WriteLine($"TC{unit}: attach failed - {error}");
+    }
+
+    private void HandleTcRead(int unit, string[] args)
+    {
+        if (args.Length < 2 || !TryParseNumber(args[0], out var block) || !TryParseNumber(args[1], out var addr))
+        {
+            Console.WriteLine($"Usage: tc{unit} read <block> <addr>");
+            return;
+        }
+
+        Span<ushort> buffer = stackalloc ushort[Tc08.WordsPerBlock];
+        if (!_tc08!.TryReadBlock(unit, block, buffer, out var error))
+        {
+            Console.WriteLine($"TC{unit}: read failed - {error}");
+            return;
+        }
+
+        for (var i = 0; i < Tc08.WordsPerBlock; i++)
+        {
+            _cpu.WriteMemory((ushort)(addr + i), buffer[i]);
+        }
+
+        Console.WriteLine($"TC{unit}: read block {NovaCpu.FormatWord(block)} -> {NovaCpu.FormatWord(addr)}");
+    }
+
+    private void HandleTcWrite(int unit, string[] args)
+    {
+        if (args.Length < 2 || !TryParseNumber(args[0], out var block) || !TryParseNumber(args[1], out var addr))
+        {
+            Console.WriteLine($"Usage: tc{unit} write <block> <addr>");
+            return;
+        }
+
+        Span<ushort> buffer = stackalloc ushort[Tc08.WordsPerBlock];
+        for (var i = 0; i < Tc08.WordsPerBlock; i++)
+        {
+            buffer[i] = _cpu.ReadMemory((ushort)(addr + i));
+        }
+
+        if (!_tc08!.TryWriteBlock(unit, block, buffer, out var error))
+        {
+            Console.WriteLine($"TC{unit}: write failed - {error}");
+            return;
+        }
+
+        Console.WriteLine($"TC{unit}: wrote block {NovaCpu.FormatWord(block)} <- {NovaCpu.FormatWord(addr)}");
+    }
+
+    private void HandleTcVerify(int unit, string[] args)
+    {
+        if (args.Length < 2 || !TryParseNumber(args[0], out var block) || !TryParseNumber(args[1], out var addr))
+        {
+            Console.WriteLine($"Usage: tc{unit} verify <block> <addr>");
+            return;
+        }
+
+        Span<ushort> buffer = stackalloc ushort[Tc08.WordsPerBlock];
+        if (!_tc08!.TryReadBlock(unit, block, buffer, out var error))
+        {
+            Console.WriteLine($"TC{unit}: verify failed - {error}");
+            return;
+        }
+
+        var mismatches = 0;
+        for (var i = 0; i < Tc08.WordsPerBlock; i++)
+        {
+            var mem = _cpu.ReadMemory((ushort)(addr + i));
+            if (mem != buffer[i])
+            {
+                mismatches++;
+                if (mismatches == 1)
+                {
+                    var loc = (ushort)(addr + i);
+                    Console.WriteLine($"TC{unit}: mismatch at {NovaCpu.FormatWord(loc)} mem={NovaCpu.FormatWord(mem)} tape={NovaCpu.FormatWord(buffer[i])}");
+                }
+            }
+        }
+
+        if (mismatches == 0)
+        {
+            Console.WriteLine($"TC{unit}: verify OK for block {NovaCpu.FormatWord(block)} at {NovaCpu.FormatWord(addr)}");
+            return;
+        }
+
+        Console.WriteLine($"TC{unit}: verify found {mismatches} mismatch(es)");
     }
 
     private void ListBreakpoints()
@@ -713,6 +933,10 @@ public class NovaMonitor
             ["deposit"] = "deposit <addr> <v>  Store value at address",
             ["step"] = "step [n]             Step through n instructions",
             ["run"] = "run [n]              Run until HALT/breakpoint or n instructions",
+            ["go"] = "go <addr> [n]        Set PC and run until HALT/breakpoint or n instructions",
+            ["tc"] = "tc status            Show TC08 drive status",
+            ["tc0"] = "tc0 <cmd> ...        TC08 unit 0 (attach/read/write/verify)",
+            ["tc1"] = "tc1 <cmd> ...        TC08 unit 1 (attach/read/write/verify)",
             ["break"] = "break <addr>         Toggle breakpoint",
             ["breaks"] = "breaks              List breakpoints",
             ["dis"] = "dis <addr> [n]       Disassemble n words from addr",
