@@ -610,21 +610,46 @@ public class NovaMonitor
 
     private void LoadSample()
     {
-        _cpu.Reset(0x0200);
-        // A tiny demonstration program. AC0 counts up to 10, halting when done.
-        var program = new ushort[]
-        {
-            EncodeImmediate(Instruction.LoadImmediate, 0, 0), // AC0 = 0
-            EncodeImmediate(Instruction.LoadImmediate, 1, 10), // AC1 = 10
-            EncodeImmediate(Instruction.AddImmediate, 0, 1),   // loop: AC0++
-            EncodeImmediate(Instruction.AddImmediate, 1, unchecked((ushort)-1)), // AC1--
-            EncodeInstruction(Instruction.ConditionalBranch, 1, page: true, offset: 0x02), // BNZ to loop
-            EncodeInstruction(Instruction.Halt, 0),
-        };
+        var startAddress = (ushort)0x0200; // 0o0200
+        _cpu.Reset(startAddress);
 
-        for (var i = 0; i < program.Length; i++)
+        const string source = """
+ORG 0200
+START:  LDA AC0, ZERO
+        STA AC0, COUNT
+        LDA AC0, TEN
+        STA AC0, LIMIT
+LOOP:   ISZ COUNT
+        DSZ LIMIT
+        JMP LOOP
+        HALT
+ZERO:   DW 0
+TEN:    DW 0o12
+COUNT:  DW 0
+LIMIT:  DW 0
+""";
+
+        var assembler = new NovaAssembler();
+        var result = assembler.Assemble(source);
+        if (!result.Success)
         {
-            _cpu.WriteMemory((ushort)(_cpu.ProgramCounter + i), program[i]);
+            Console.WriteLine("Sample assembly failed:");
+            foreach (var diag in result.Diagnostics)
+            {
+                Console.WriteLine($"  Line {diag.LineNumber}: {diag.Message}");
+            }
+
+            return;
+        }
+
+        foreach (var word in result.Words)
+        {
+            _cpu.WriteMemory(word.Address, word.Value);
+        }
+
+        if (result.StartAddress.HasValue)
+        {
+            _cpu.SetProgramCounter(result.StartAddress.Value);
         }
 
         Console.WriteLine("Sample program loaded at 0200. Use 'run' or 'step' to execute.");
@@ -988,50 +1013,31 @@ public class NovaMonitor
             return FormatInstruction(address, instruction, DisassembleIo(instruction));
         }
 
-        var opcode = (Instruction)(instruction >> 12);
-        var accumulator = (instruction >> 10) & 0x3;
-        var indirect = (instruction & 0x200) != 0;
-        var page = (instruction & 0x100) != 0;
-        var offset = (ushort)(instruction & NovaCpu.OffsetMask);
-        return opcode switch
+        if ((instruction & 0x8000) != 0)
         {
-            Instruction.Nop => FormatInstruction(address, instruction, "NOP"),
-            Instruction.Load => FormatInstruction(address, instruction, $"LDA AC{accumulator}, {FormatEffective(address, page, indirect, offset)}"),
-            Instruction.Store => FormatInstruction(address, instruction, $"STA AC{accumulator}, {FormatEffective(address, page, indirect, offset)}"),
-            Instruction.Add => FormatInstruction(address, instruction, $"ADD AC{accumulator}, {FormatEffective(address, page, indirect, offset)}"),
-            Instruction.Subtract => FormatInstruction(address, instruction, $"SUB AC{accumulator}, {FormatEffective(address, page, indirect, offset)}"),
-            Instruction.And => FormatInstruction(address, instruction, $"AND AC{accumulator}, {FormatEffective(address, page, indirect, offset)}"),
-            Instruction.Or => FormatInstruction(address, instruction, $"OR AC{accumulator}, {FormatEffective(address, page, indirect, offset)}"),
-            Instruction.Xor => FormatInstruction(address, instruction, $"XOR AC{accumulator}, {FormatEffective(address, page, indirect, offset)}"),
-            Instruction.Shift => FormatInstruction(address, instruction, $"SHFT AC{accumulator}, {(indirect ? "R" : "L")}{offset & 0xF}{((offset & 0x20) != 0 ? "L" : string.Empty)}"),
-            Instruction.AddImmediate => FormatInstruction(address, instruction, $"ADDI AC{accumulator}, {NovaCpu.FormatWord(offset)}"),
-            Instruction.Branch => FormatInstruction(address, instruction, $"BR {FormatEffective(address, page, indirect, offset)}"),
-            Instruction.ConditionalBranch => FormatInstruction(address, instruction, $"B{(indirect ? "NZ" : "Z")} AC{accumulator}, {FormatEffective(address, page, false, offset)}"),
-            Instruction.JumpToSubroutine => FormatInstruction(address, instruction, $"JSR AC{accumulator}, {FormatEffective(address, page, indirect, offset)}"),
-            Instruction.LoadImmediate => FormatInstruction(address, instruction, $"LDAI AC{accumulator}, {NovaCpu.FormatWord(offset)}"),
-            Instruction.IncSkip => FormatInstruction(address, instruction, $"ISZ {FormatEffective(address, page, indirect, offset)}"),
-            Instruction.Halt => FormatInstruction(address, instruction, "HALT"),
-            _ => FormatInstruction(address, instruction, $"DW {NovaCpu.FormatWord(instruction)}")
-        };
+            return FormatInstruction(address, instruction, DisassembleOperate(instruction));
+        }
+
+        return FormatInstruction(address, instruction, DisassembleMrf(address, instruction));
     }
 
     private string DisassembleIo(ushort instruction)
     {
-        var signal = (instruction >> 11) & 0x3;
+        var ac = (instruction >> 11) & 0x3;
         var function = (instruction >> 8) & 0x7;
-        var ac = (instruction >> 6) & 0x3;
+        var pulse = (instruction >> 6) & 0x3;
         var device = instruction & 0x3F;
         var deviceText = Convert.ToString(device, 8).PadLeft(2, '0');
         return function switch
         {
-            0 => $"NIO {FormatSignal(signal)}{deviceText}",
+            0 => $"NIO {FormatSignal(pulse)}{deviceText}",
             1 => $"DIA AC{ac}, {deviceText}",
             2 => $"DOA AC{ac}, {deviceText}",
             3 => $"DIB AC{ac}, {deviceText}",
             4 => $"DOB AC{ac}, {deviceText}",
             5 => $"DIC AC{ac}, {deviceText}",
             6 => $"DOC AC{ac}, {deviceText}",
-            _ => ac switch
+            _ => pulse switch
             {
                 0 => $"SKPBN {deviceText}",
                 1 => $"SKPBZ {deviceText}",
@@ -1039,6 +1045,71 @@ public class NovaMonitor
                 _ => $"SKPDZ {deviceText}"
             }
         };
+    }
+
+    private string DisassembleMrf(ushort address, ushort instruction)
+    {
+        var opac = (instruction >> 11) & 0x1F;
+        var indirect = (instruction & 0x0400) != 0;
+        var mode = (instruction >> 8) & 0x3;
+        var displacement = instruction & 0xFF;
+        var operand = FormatSimhOperand((ushort)(address + 1), indirect, mode, displacement);
+
+        return opac switch
+        {
+            0 => $"JMP {operand}",
+            1 => $"JMS {operand}",
+            2 => $"ISZ {operand}",
+            3 => $"DSZ {operand}",
+            4 => $"LDA AC0, {operand}",
+            5 => $"LDA AC1, {operand}",
+            6 => $"LDA AC2, {operand}",
+            7 => $"LDA AC3, {operand}",
+            8 => $"STA AC0, {operand}",
+            9 => $"STA AC1, {operand}",
+            10 => $"STA AC2, {operand}",
+            11 => $"STA AC3, {operand}",
+            _ => $"DW {NovaCpu.FormatWord(instruction)}"
+        };
+    }
+
+    private static string DisassembleOperate(ushort instruction)
+    {
+        var src = (instruction >> 13) & 0x3;
+        var dst = (instruction >> 11) & 0x3;
+        var alu = (instruction >> 8) & 0x7;
+        var shift = (instruction >> 6) & 0x3;
+        var carry = (instruction >> 4) & 0x3;
+        var noLoad = (instruction & 0x8) != 0;
+        var skip = instruction & 0x7;
+
+        var aluNames = new[] { "COM", "NEG", "MOV", "INC", "ADC", "SUB", "ADD", "AND" };
+        var shiftNames = new[] { string.Empty, "L", "R", "S" };
+        var carryNames = new[] { string.Empty, "CL", "SET", "CMP" };
+        var skipNames = new[] { string.Empty, "SKP", "SZC", "SNC", "SZR", "SNR", "SEZ", "SBN" };
+
+        var text = $"{aluNames[alu]} AC{src}, AC{dst}";
+        if (shift != 0)
+        {
+            text += $" {shiftNames[shift]}";
+        }
+
+        if (carry != 0)
+        {
+            text += $" {carryNames[carry]}";
+        }
+
+        if (noLoad)
+        {
+            text += " NL";
+        }
+
+        if (skip != 0)
+        {
+            text += $" {skipNames[skip]}";
+        }
+
+        return text;
     }
 
     private string FormatInstruction(ushort address, ushort instruction, string text)
@@ -1251,6 +1322,58 @@ public class NovaMonitor
             3 => "P, ",
             _ => string.Empty
         };
+    }
+
+    private static string FormatSimhOperand(ushort pc, bool indirect, int mode, int displacement)
+    {
+        string text;
+        switch (mode)
+        {
+            case 0:
+                text = NovaCpu.FormatWord((ushort)displacement);
+                break;
+            case 1:
+                {
+                    var ea = (ushort)((pc + SignExtend8(displacement)) & NovaCpu.AddressMask);
+                    text = NovaCpu.FormatWord(ea);
+                    break;
+                }
+            case 2:
+                text = $"{FormatSignedDisplacement(displacement)},AC2";
+                break;
+            default:
+                text = $"{FormatSignedDisplacement(displacement)},AC3";
+                break;
+        }
+
+        return indirect ? $"@{text}" : text;
+    }
+
+    private static string FormatSignedDisplacement(int displacement)
+    {
+        var signed = (sbyte)(displacement & 0xFF);
+        if (signed < 0)
+        {
+            return $"-0o{Convert.ToString(-signed, 8)}";
+        }
+
+        if (signed == 0)
+        {
+            return "0";
+        }
+
+        return $"0o{Convert.ToString(signed, 8)}";
+    }
+
+    private static short SignExtend8(int value)
+    {
+        var masked = value & 0xFF;
+        if ((masked & 0x80) != 0)
+        {
+            return (short)(masked | unchecked((short)0xFF00));
+        }
+
+        return (short)masked;
     }
 
     private static string ComputeMd5(string path)

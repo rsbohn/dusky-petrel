@@ -1,15 +1,17 @@
         ORG 0o200
 
 LOOP:   SKPDN TTI
-        BR LOOP
-        DIA TTI
+        JMP LOOP
+        DIA AC0, TTI
         STA AC0, CH
         LDA AC0, CH
-        SUB AC0, EOT
-        BZ AC0, DONE
+        LDA AC1, EOT
+        SUBZ AC1, AC0
+        MOV AC0, AC0, SNR
+        JMP DONE
         LDA AC0, CH
-        DOA TTO
-        BR LOOP
+        DOA AC0, TTO
+        JMP LOOP
 
 DONE:   HALT
 

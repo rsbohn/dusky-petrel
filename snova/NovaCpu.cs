@@ -87,228 +87,12 @@ public class NovaCpu
             return ExecuteIo(instruction, instructionAddress);
         }
 
-        var opcode = (Instruction)(instruction >> 12);
-        var accumulator = (instruction >> 10) & 0x3;
-        var indirect = (instruction & 0x200) != 0;
-        var page = (instruction & 0x100) != 0;
-        var offset = (ushort)(instruction & OffsetMask);
-        var description = string.Empty;
-        var tookBranch = false;
-
-        ushort EffectiveAddress()
+        if ((instruction & 0x8000) != 0)
         {
-            var baseAddress = page ? (ushort)(ProgramCounter & PageMask) : (ushort)0;
-            var ea = (ushort)((baseAddress | offset) & AddressMask);
-            if (indirect)
-            {
-                ea = (ushort)(ReadMemory(ea) & AddressMask);
-            }
-
-            return ea;
+            return ExecuteOperate(instruction, instructionAddress);
         }
 
-        ushort DirectAddress()
-        {
-            var baseAddress = page ? (ushort)(ProgramCounter & PageMask) : (ushort)0;
-            return (ushort)((baseAddress | offset) & AddressMask);
-        }
-
-        switch (opcode)
-        {
-            case Instruction.Nop:
-                description = "NOP";
-                break;
-            case Instruction.Load:
-                {
-                    var ea = EffectiveAddress();
-                    Accumulators[accumulator] = ReadMemory(ea);
-                    description = $"LDA AC{accumulator}, @{FormatAddress(ea)}";
-                }
-                break;
-            case Instruction.Store:
-                {
-                    var ea = EffectiveAddress();
-                    WriteMemory(ea, Accumulators[accumulator]);
-                    description = $"STA AC{accumulator}, @{FormatAddress(ea)}";
-                }
-                break;
-            case Instruction.Add:
-                {
-                    var ea = EffectiveAddress();
-                    var value = ReadMemory(ea);
-                    var (result, carry) = AddWithCarry(Accumulators[accumulator], value, Link);
-                    Accumulators[accumulator] = result;
-                    Link = carry;
-                    description = $"ADD AC{accumulator}, @{FormatAddress(ea)}";
-                }
-                break;
-            case Instruction.Subtract:
-                {
-                    var ea = EffectiveAddress();
-                    var value = ReadMemory(ea);
-                    var (result, borrow) = SubtractWithBorrow(Accumulators[accumulator], value, Link);
-                    Accumulators[accumulator] = result;
-                    Link = borrow;
-                    description = $"SUB AC{accumulator}, @{FormatAddress(ea)}";
-                }
-                break;
-            case Instruction.And:
-                {
-                    var ea = EffectiveAddress();
-                    var value = ReadMemory(ea);
-                    Accumulators[accumulator] &= value;
-                    Link = false;
-                    description = $"AND AC{accumulator}, @{FormatAddress(ea)}";
-                }
-                break;
-            case Instruction.Or:
-                {
-                    var ea = EffectiveAddress();
-                    var value = ReadMemory(ea);
-                    Accumulators[accumulator] |= value;
-                    Link = false;
-                    description = $"OR AC{accumulator}, @{FormatAddress(ea)}";
-                }
-                break;
-            case Instruction.Xor:
-                {
-                    var ea = EffectiveAddress();
-                    var value = ReadMemory(ea);
-                    Accumulators[accumulator] ^= value;
-                    Link = false;
-                    description = $"XOR AC{accumulator}, @{FormatAddress(ea)}";
-                }
-                break;
-            case Instruction.Shift:
-                {
-                    var count = offset & 0xF;
-                    var directionRight = (offset & 0x10) != 0;
-                    var throughLink = (offset & 0x20) != 0;
-                    var value = Accumulators[accumulator];
-                    if (count == 0)
-                    {
-                        description = "SHIFT (no-op)";
-                        break;
-                    }
-
-                    if (directionRight)
-                    {
-                        for (var i = 0; i < count; i++)
-                        {
-                            var newLink = (value & 0x1) != 0;
-                            value >>= 1;
-                            if (throughLink && Link)
-                            {
-                                value |= 0x8000;
-                            }
-
-                            Link = newLink;
-                        }
-
-                        description = $"SHR{(throughLink ? 'L' : ' ')} AC{accumulator}, {count}";
-                    }
-                    else
-                    {
-                        for (var i = 0; i < count; i++)
-                        {
-                            var newLink = (value & 0x8000) != 0;
-                            value <<= 1;
-                            value &= WordMask;
-                            if (throughLink && Link)
-                            {
-                                value |= 0x1;
-                            }
-
-                            Link = newLink;
-                        }
-
-                        description = $"SHL{(throughLink ? 'L' : ' ')} AC{accumulator}, {count}";
-                    }
-
-                    Accumulators[accumulator] = value;
-                }
-                break;
-            case Instruction.AddImmediate:
-                {
-                    var imm = SignExtend8(offset);
-                    var (result, carry) = AddWithCarry(Accumulators[accumulator], (ushort)imm, Link);
-                    Accumulators[accumulator] = result;
-                    Link = carry;
-                    description = $"ADDI AC{accumulator}, {imm:+#0;-#0;+0}";
-                }
-                break;
-            case Instruction.Branch:
-                {
-                    var ea = EffectiveAddress();
-                    ProgramCounter = ea;
-                    description = $"BR @{FormatAddress(ea)}";
-                    tookBranch = true;
-                }
-                break;
-            case Instruction.ConditionalBranch:
-                {
-                    var ea = DirectAddress();
-                    var targetAcc = Accumulators[accumulator];
-                    var shouldBranch = indirect ? !IsZero(targetAcc) : IsZero(targetAcc);
-                    if (shouldBranch)
-                    {
-                        ProgramCounter = ea;
-                        tookBranch = true;
-                    }
-
-                    description = shouldBranch
-                        ? $"B{(indirect ? "NZ" : "Z")} @{FormatAddress(ea)}"
-                        : $"B{(indirect ? "NZ" : "Z")} (not taken)";
-                }
-                break;
-            case Instruction.JumpToSubroutine:
-                {
-                    var ea = EffectiveAddress();
-                    Accumulators[accumulator] = ProgramCounter;
-                    ProgramCounter = ea;
-                    tookBranch = true;
-                    description = $"JSR AC{accumulator}, @{FormatAddress(ea)}";
-                }
-                break;
-            case Instruction.LoadImmediate:
-                {
-                    var imm = (ushort)offset;
-                    Accumulators[accumulator] = imm;
-                    Link = false;
-                    description = $"LDAI AC{accumulator}, {FormatWord(imm)}";
-                }
-                break;
-            case Instruction.IncSkip:
-                {
-                    var ea = EffectiveAddress();
-                    var value = (ushort)((ReadMemory(ea) + 1) & WordMask);
-                    WriteMemory(ea, value);
-                    var skip = value == 0;
-                    if (skip)
-                    {
-                        ProgramCounter = (ushort)((ProgramCounter + 1) & AddressMask);
-                    }
-
-                    description = skip
-                        ? $"ISZ @{FormatAddress(ea)} (skip)"
-                        : $"ISZ @{FormatAddress(ea)}";
-                }
-                break;
-            case Instruction.Halt:
-                description = "HALT";
-                Halt("HALT instruction");
-                break;
-            default:
-                description = $"Unknown opcode {opcode} (halting)";
-                Halt("Unknown opcode");
-                break;
-        }
-
-        return new ExecutionStep(instructionAddress, instruction, description, Halted, tookBranch)
-        {
-            AccumulatorIndex = accumulator,
-            Link = Link
-        };
+        return ExecuteMrf(instruction, instructionAddress);
     }
 
     private ushort Fetch()
@@ -334,7 +118,15 @@ public class NovaCpu
             accumulatorValue = Accumulators[io.Ac];
         }
 
-        handled = IoBus.TryExecute(io, ref accumulatorValue, out skip);
+        if (io.DeviceCode == 63 && io.Kind == NovaIoOpKind.DOC && !io.Start && !io.Clear && !io.Pulse) // 0o77
+        {
+            Halt("HALT instruction");
+            handled = true;
+        }
+        else
+        {
+            handled = IoBus.TryExecute(io, ref accumulatorValue, out skip);
+        }
         if (handled && usesAccumulator)
         {
             Accumulators[io.Ac] = (ushort)(accumulatorValue & WordMask);
@@ -362,14 +154,10 @@ public class NovaCpu
 
     private static NovaIoOp DecodeIo(ushort instruction)
     {
-        var signal = (instruction >> 11) & 0x3;
+        var ac = (instruction >> 11) & 0x3;
         var function = (instruction >> 8) & 0x7;
-        var ac = (instruction >> 6) & 0x3;
+        var pulse = (instruction >> 6) & 0x3;
         var device = instruction & 0x3F;
-
-        var start = signal == 1;
-        var clear = signal == 2;
-        var pulse = signal == 3;
 
         var kind = function switch
         {
@@ -380,7 +168,7 @@ public class NovaCpu
             4 => NovaIoOpKind.DOB,
             5 => NovaIoOpKind.DIC,
             6 => NovaIoOpKind.DOC,
-            _ => ac switch
+            _ => pulse switch
             {
                 0 => NovaIoOpKind.SKPBN,
                 1 => NovaIoOpKind.SKPBZ,
@@ -389,7 +177,11 @@ public class NovaCpu
             }
         };
 
-        return new NovaIoOp(kind, device, ac, start, clear, pulse);
+        var start = function != 7 && pulse == 1;
+        var clear = function != 7 && pulse == 2;
+        var sendPulse = function != 7 && pulse == 3;
+
+        return new NovaIoOp(kind, device, ac, start, clear, sendPulse);
     }
 
     private static string FormatIoDescription(NovaIoOp op)
@@ -430,6 +222,248 @@ public class NovaCpu
         }
 
         return string.Empty;
+    }
+
+    private ExecutionStep ExecuteMrf(ushort instruction, ushort instructionAddress)
+    {
+        var opac = (instruction >> 11) & 0x1F;
+        var indirect = (instruction & 0x0400) != 0;
+        var mode = (instruction >> 8) & 0x3;
+        var displacement = instruction & 0xFF;
+
+        var ea = EffectiveAddress(indirect, mode, displacement);
+        var description = string.Empty;
+        var tookBranch = false;
+        var accumulator = 0;
+
+        switch (opac)
+        {
+            case 0:
+                ProgramCounter = ea;
+                tookBranch = true;
+                description = $"JMP @{FormatAddress(ea)}";
+                break;
+            case 1:
+                Accumulators[3] = ProgramCounter;
+                ProgramCounter = ea;
+                tookBranch = true;
+                description = $"JMS @{FormatAddress(ea)}";
+                break;
+            case 2:
+                {
+                    var value = (ushort)((ReadMemory(ea) + 1) & WordMask);
+                    WriteMemory(ea, value);
+                    if (value == 0)
+                    {
+                        ProgramCounter = (ushort)((ProgramCounter + 1) & AddressMask);
+                        tookBranch = true;
+                    }
+
+                    description = $"ISZ @{FormatAddress(ea)}";
+                }
+                break;
+            case 3:
+                {
+                    var value = (ushort)((ReadMemory(ea) - 1) & WordMask);
+                    WriteMemory(ea, value);
+                    if (value == 0)
+                    {
+                        ProgramCounter = (ushort)((ProgramCounter + 1) & AddressMask);
+                        tookBranch = true;
+                    }
+
+                    description = $"DSZ @{FormatAddress(ea)}";
+                }
+                break;
+            case 4:
+            case 5:
+            case 6:
+            case 7:
+                accumulator = opac & 0x3;
+                Accumulators[accumulator] = ReadMemory(ea);
+                description = $"LDA AC{accumulator}, @{FormatAddress(ea)}";
+                break;
+            case 8:
+            case 9:
+            case 10:
+            case 11:
+                accumulator = opac & 0x3;
+                WriteMemory(ea, Accumulators[accumulator]);
+                description = $"STA AC{accumulator}, @{FormatAddress(ea)}";
+                break;
+            default:
+                description = $"Unknown MRF opcode {opac} (halting)";
+                Halt("Unknown MRF opcode");
+                break;
+        }
+
+        return new ExecutionStep(instructionAddress, instruction, description, Halted, tookBranch)
+        {
+            AccumulatorIndex = accumulator,
+            Link = Link
+        };
+    }
+
+    private ExecutionStep ExecuteOperate(ushort instruction, ushort instructionAddress)
+    {
+        var src = (instruction >> 13) & 0x3;
+        var dst = (instruction >> 11) & 0x3;
+        var alu = (instruction >> 8) & 0x7;
+        var shift = (instruction >> 6) & 0x3;
+        var carryControl = (instruction >> 4) & 0x3;
+        var noLoad = (instruction & 0x8) != 0;
+        var skip = instruction & 0x7;
+
+        var srcValue = Accumulators[src];
+        var dstValue = Accumulators[dst];
+        var description = $"OPR src=AC{src} dst=AC{dst}";
+
+        var carryIn = ApplyCarryControl(carryControl);
+        var result = (ushort)0;
+        var carryOut = Link;
+        var updatesCarry = false;
+
+        switch (alu)
+        {
+            case 0: // COM
+                result = (ushort)~srcValue;
+                break;
+            case 1: // NEG
+                (result, carryOut) = AddWithCarry((ushort)~srcValue, 0, true);
+                updatesCarry = true;
+                break;
+            case 2: // MOV
+                result = srcValue;
+                break;
+            case 3: // INC
+                (result, carryOut) = AddWithCarry(srcValue, 1, false);
+                updatesCarry = true;
+                break;
+            case 4: // ADC
+                (result, carryOut) = AddWithCarry(dstValue, srcValue, carryIn);
+                updatesCarry = true;
+                break;
+            case 5: // SUB
+                (result, carryOut) = SubtractWithBorrow(dstValue, srcValue, carryIn);
+                updatesCarry = true;
+                break;
+            case 6: // ADD
+                (result, carryOut) = AddWithCarry(dstValue, srcValue, false);
+                updatesCarry = true;
+                break;
+            case 7: // AND
+                result = (ushort)(dstValue & srcValue);
+                break;
+        }
+
+        if (updatesCarry)
+        {
+            Link = carryOut;
+        }
+
+        result = ApplyShift(result, shift, out var shiftCarry);
+        if (shiftCarry.HasValue)
+        {
+            Link = shiftCarry.Value;
+        }
+
+        if (!noLoad)
+        {
+            Accumulators[dst] = result;
+        }
+
+        var tookBranch = ApplySkip(skip, result);
+        if (tookBranch)
+        {
+            ProgramCounter = (ushort)((ProgramCounter + 1) & AddressMask);
+        }
+
+        return new ExecutionStep(instructionAddress, instruction, description, Halted, tookBranch)
+        {
+            AccumulatorIndex = dst,
+            Link = Link
+        };
+    }
+
+    private ushort EffectiveAddress(bool indirect, int mode, int displacement)
+    {
+        var offset = mode == 0 ? displacement : SignExtend8(displacement);
+        var baseAddress = mode switch
+        {
+            0 => 0,
+            1 => ProgramCounter,
+            2 => Accumulators[2],
+            _ => Accumulators[3]
+        };
+
+        var ea = (ushort)(((baseAddress + offset) & AddressMask));
+        return indirect ? ResolveIndirect(ea) : ea;
+    }
+
+    private ushort ResolveIndirect(ushort pointer)
+    {
+        if (pointer >= 16 && pointer <= 23) // 0o20-0o27
+        {
+            var updated = (ushort)((ReadMemory(pointer) + 1) & WordMask);
+            WriteMemory(pointer, updated);
+            return (ushort)(updated & AddressMask);
+        }
+
+        if (pointer >= 24 && pointer <= 31) // 0o30-0o37
+        {
+            var updated = (ushort)((ReadMemory(pointer) - 1) & WordMask);
+            WriteMemory(pointer, updated);
+            return (ushort)(updated & AddressMask);
+        }
+
+        return (ushort)(ReadMemory(pointer) & AddressMask);
+    }
+
+    private bool ApplyCarryControl(int carryControl)
+    {
+        var carryIn = carryControl switch
+        {
+            1 => false,
+            2 => true,
+            3 => !Link,
+            _ => Link
+        };
+
+        Link = carryIn;
+        return carryIn;
+    }
+
+    private static ushort ApplyShift(ushort value, int shift, out bool? carryOut)
+    {
+        carryOut = null;
+        switch (shift)
+        {
+            case 1: // left
+                carryOut = (value & 0x8000) != 0;
+                return (ushort)((value << 1) & WordMask);
+            case 2: // right
+                carryOut = (value & 0x1) != 0;
+                return (ushort)(value >> 1);
+            case 3: // swap
+                return (ushort)(((value & 0xFF) << 8) | ((value >> 8) & 0xFF));
+            default:
+                return value;
+        }
+    }
+
+    private bool ApplySkip(int skip, ushort result)
+    {
+        return skip switch
+        {
+            1 => true,
+            2 => !Link,
+            3 => Link,
+            4 => result == 0,
+            5 => result != 0,
+            6 => !Link || result == 0,
+            7 => Link && result != 0,
+            _ => false
+        };
     }
 
     private static (ushort Result, bool Carry) AddWithCarry(ushort left, ushort right, bool link)

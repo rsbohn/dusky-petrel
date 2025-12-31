@@ -5,103 +5,140 @@
 ; DIA = minutes since midnight
 ; DIB/DIC = epoch seconds (low/high)
 
-START:  BR      READ_TIME
+START:  LDA     AC2, DATA_BASE
+        JMP     READ_TIME
 
 READ_TIME:
-        DIC     0o21           ; epoch seconds high (sample 1)
-        STA     AC0, HI1
-        DIB     0o21           ; epoch seconds low
-        STA     AC0, SEC_LO
-        DIC     0o21           ; epoch seconds high (sample 2)
-        STA     AC0, HI2
-        LDA     AC0, HI1
-        SUB     AC0, HI2
-        BNZ     AC0, READ_TIME
-        LDA     AC0, HI1
-        STA     AC0, SEC_HI
-        DIA     0o21           ; minutes since midnight
-        STA     AC0, MINUTES_RAW
-        STA     AC0, MINUTES
+        DIC     AC0, 0o21      ; epoch seconds high (sample 1)
+        STA     AC0, HI1-DATA_BASE,AC2
+        DIB     AC0, 0o21      ; epoch seconds low
+        STA     AC0, SEC_LO-DATA_BASE,AC2
+        DIC     AC0, 0o21      ; epoch seconds high (sample 2)
+        STA     AC0, HI2-DATA_BASE,AC2
+        LDA     AC0, HI1-DATA_BASE,AC2
+        LDA     AC1, HI2-DATA_BASE,AC2
+        SUBZ    AC1, AC0
+        MOV     AC0, AC0, SZR
+        JMP     READ_TIME
+        LDA     AC0, HI1-DATA_BASE,AC2
+        STA     AC0, SEC_HI-DATA_BASE,AC2
+        DIA     AC0, 0o21      ; minutes since midnight
+        STA     AC0, MINUTES_RAW-DATA_BASE,AC2
+        STA     AC0, MINUTES-DATA_BASE,AC2
 
-        LDAI    AC0, 0
-        STA     AC0, MIN
-        STA     AC0, HOUR
+        LDA     AC0, ZERO-DATA_BASE,AC2
+        STA     AC0, MIN-DATA_BASE,AC2
+        STA     AC0, HOUR-DATA_BASE,AC2
 
 ; Hours/minutes from minutes-since-midnight
 MIN_DIV:
-        LDAI    AC2, 0          ; clear LINK for subtract
-        LDA     AC0, MINUTES
-        SUB     AC0, SIXTY
-        STA     AC0, MIN_TMP
-        LDA     AC0, MIN_TMP
-        AND     AC0, SIGN
-        BNZ     AC0, MIN_DONE
+        LDA     AC0, MINUTES-DATA_BASE,AC2
+        LDA     AC1, SIXTY-DATA_BASE,AC2
+        SUBZ    AC1, AC0
+        STA     AC0, MIN_TMP-DATA_BASE,AC2
+        LDA     AC0, MIN_TMP-DATA_BASE,AC2
+        LDA     AC1, SIGN-DATA_BASE,AC2
+        AND     AC1, AC0
+        MOV     AC0, AC0, SZR
+        JMP     MIN_DONE
 
-        LDA     AC0, MIN_TMP
-        STA     AC0, MINUTES
-        LDAI    AC2, 0
-        LDA     AC0, HOUR
-        ADD     AC0, ONE
-        STA     AC0, HOUR
-        BR      MIN_DIV
+        LDA     AC0, MIN_TMP-DATA_BASE,AC2
+        STA     AC0, MINUTES-DATA_BASE,AC2
+        LDA     AC0, HOUR-DATA_BASE,AC2
+        LDA     AC1, ONE-DATA_BASE,AC2
+        ADDZ    AC1, AC0
+        STA     AC0, HOUR-DATA_BASE,AC2
+        JMP     MIN_DIV
 
 MIN_DONE:
-        LDA     AC0, MINUTES
-        STA     AC0, MIN
+        LDA     AC0, MINUTES-DATA_BASE,AC2
+        STA     AC0, MIN-DATA_BASE,AC2
 
 DONE:
-        LDA     AC0, HOUR
-        JSR     3, PRINT2
-        LDAI    AC0, 0o072      ; ':'
-        DOA     TTO
-        LDA     AC0, MIN
-        JSR     3, PRINT2
-        LDAI    AC0, 0o040      ; ' '
-        DOA     TTO
-        LDAI    AC0, 0o104      ; 'D'
-        DOA     TTO
-        LDAI    AC0, 0o111      ; 'I'
-        DOA     TTO
-        LDAI    AC0, 0o101      ; 'A'
-        DOA     TTO
-        LDAI    AC0, 0o075      ; '='
-        DOA     TTO
-        LDA     AC0, MINUTES_RAW
-        SHR     AC0, 12
-        JSR     3, PRINT2
-        LDA     AC0, MINUTES_RAW
-        SHR     AC0, 6
-        AND     AC0, SIXTY_FOUR
-        JSR     3, PRINT2
-        LDA     AC0, MINUTES_RAW
-        AND     AC0, SIXTY_FOUR
-        JSR     3, PRINT2
-        LDAI    AC0, 0o015      ; CR
-        DOA     TTO
-        LDAI    AC0, 0o012      ; LF
-        DOA     TTO
+        LDA     AC0, HOUR-DATA_BASE,AC2
+        JSR     PRINT2
+        LDA     AC0, COLON-DATA_BASE,AC2      ; ':'
+        DOA     AC0, TTO
+        LDA     AC0, MIN-DATA_BASE,AC2
+        JSR     PRINT2
+        LDA     AC0, SPACE-DATA_BASE,AC2      ; ' '
+        DOA     AC0, TTO
+        LDA     AC0, CHAR_D-DATA_BASE,AC2     ; 'D'
+        DOA     AC0, TTO
+        LDA     AC0, CHAR_I-DATA_BASE,AC2     ; 'I'
+        DOA     AC0, TTO
+        LDA     AC0, CHAR_A-DATA_BASE,AC2     ; 'A'
+        DOA     AC0, TTO
+        LDA     AC0, CHAR_EQ-DATA_BASE,AC2    ; '='
+        DOA     AC0, TTO
+        LDA     AC0, MINUTES_RAW-DATA_BASE,AC2
+        MOVR    AC0, AC0
+        MOVR    AC0, AC0
+        MOVR    AC0, AC0
+        MOVR    AC0, AC0
+        MOVR    AC0, AC0
+        MOVR    AC0, AC0
+        MOVR    AC0, AC0
+        MOVR    AC0, AC0
+        MOVR    AC0, AC0
+        MOVR    AC0, AC0
+        MOVR    AC0, AC0
+        MOVR    AC0, AC0
+        JSR     PRINT2
+        LDA     AC0, MINUTES_RAW-DATA_BASE,AC2
+        MOVR    AC0, AC0
+        MOVR    AC0, AC0
+        MOVR    AC0, AC0
+        MOVR    AC0, AC0
+        MOVR    AC0, AC0
+        MOVR    AC0, AC0
+        LDA     AC1, SIXTY_FOUR-DATA_BASE,AC2
+        AND     AC1, AC0
+        JSR     PRINT2
+        LDA     AC0, MINUTES_RAW-DATA_BASE,AC2
+        LDA     AC1, SIXTY_FOUR-DATA_BASE,AC2
+        AND     AC1, AC0
+        JSR     PRINT2
+        LDA     AC0, CR-DATA_BASE,AC2
+        DOA     AC0, TTO
+        LDA     AC0, LF-DATA_BASE,AC2
+        DOA     AC0, TTO
         HALT
 
 ; PRINT2: print AC0 as two octal digits
 PRINT2:
-        STA     3, RETADR
-        STA     AC0, TMPVAL
-        LDA     AC1, TMPVAL
-        SHR     AC1, 3
-        STA     AC1, TMP1
-        LDA     AC0, TMP1
-        ADD     AC0, ASCII0
-        DOA     TTO
-        LDA     AC1, TMPVAL
-        AND     AC1, SEVEN
-        STA     AC1, TMP2
-        LDA     AC0, TMP2
-        ADD     AC0, ASCII0
-        DOA     TTO
-        BR      @RETADR
+        STA     AC3, RETADR-DATA_BASE,AC2
+        STA     AC0, TMPVAL-DATA_BASE,AC2
+        LDA     AC1, TMPVAL-DATA_BASE,AC2
+        MOVR    AC1, AC1
+        MOVR    AC1, AC1
+        MOVR    AC1, AC1
+        STA     AC1, TMP1-DATA_BASE,AC2
+        LDA     AC0, TMP1-DATA_BASE,AC2
+        LDA     AC1, ASCII0-DATA_BASE,AC2
+        ADDZ    AC1, AC0
+        DOA     AC0, TTO
+        LDA     AC1, TMPVAL-DATA_BASE,AC2
+        LDA     AC0, SEVEN-DATA_BASE,AC2
+        AND     AC0, AC1
+        STA     AC0, TMP2-DATA_BASE,AC2
+        LDA     AC0, TMP2-DATA_BASE,AC2
+        LDA     AC1, ASCII0-DATA_BASE,AC2
+        ADDZ    AC1, AC0
+        DOA     AC0, TTO
+        JMP     @RETADR-DATA_BASE,AC2
 
+DATA_BASE: DW DATA_BASE
 ZERO:     DW 0
 ONE:      DW 1
+COLON:    DW 0o072
+SPACE:    DW 0o040
+CHAR_D:   DW 0o104
+CHAR_I:   DW 0o111
+CHAR_A:   DW 0o101
+CHAR_EQ:  DW 0o075
+CR:       DW 0o015
+LF:       DW 0o012
 SEVEN:    DW 0o7
 SIXTY:    DW 0o74
 SIGN:     DW 0o100000
