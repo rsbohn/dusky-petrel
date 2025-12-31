@@ -22,7 +22,7 @@ public readonly record struct NovaWatchdogStatus(
 
 public sealed class NovaWatchdogDevice : INovaIoDevice
 {
-    public const int DefaultDeviceCode = 12;
+    public const int DefaultDeviceCode = 56; // 0o70
 
     private readonly object _sync = new();
     private readonly NovaCpu _cpu;

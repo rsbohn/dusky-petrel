@@ -13,6 +13,8 @@ public class NovaMonitor
     private readonly NovaWatchdogDevice? _watchdog;
     private readonly Tc08? _tc08;
     private readonly NovaRtcDevice? _rtc;
+    private readonly NovaPaperTape? _paperTape;
+    private readonly NovaLinePrinterDevice? _linePrinter;
     private readonly HashSet<ushort> _breakpoints = new();
     private readonly Dictionary<string, string> _helpText;
 
@@ -21,13 +23,17 @@ public class NovaMonitor
         NovaConsoleTty? tty = null,
         NovaWatchdogDevice? watchdog = null,
         Tc08? tc08 = null,
-        NovaRtcDevice? rtc = null)
+        NovaRtcDevice? rtc = null,
+        NovaPaperTape? paperTape = null,
+        NovaLinePrinterDevice? linePrinter = null)
     {
         _cpu = cpu;
         _tty = tty;
         _watchdog = watchdog;
         _tc08 = tc08;
         _rtc = rtc;
+        _paperTape = paperTape;
+        _linePrinter = linePrinter;
         _cpu.Reset();
         _watchdog?.ResetDeviceState();
         _helpText = BuildHelp();
@@ -128,6 +134,15 @@ public class NovaMonitor
                 break;
             case "tty":
                 HandleTty(args);
+                break;
+            case "ptr":
+                HandlePtr(args);
+                break;
+            case "ptp":
+                HandlePtp(args);
+                break;
+            case "lpt":
+                HandleLpt(args);
                 break;
             case "wdt":
                 HandleWatchdog(args);
@@ -662,6 +677,118 @@ public class NovaMonitor
         }
     }
 
+    private void HandlePtr(string[] args)
+    {
+        if (_paperTape is null)
+        {
+            Console.WriteLine("Paper tape not configured.");
+            return;
+        }
+
+        if (args.Length < 1)
+        {
+            Console.WriteLine("Usage: ptr <read|status> ...");
+            return;
+        }
+
+        var subcommand = args[0].ToLowerInvariant();
+        switch (subcommand)
+        {
+            case "read":
+                if (args.Length < 2)
+                {
+                    Console.WriteLine("Usage: ptr read <filename>");
+                    return;
+                }
+
+                var path = args[1];
+                if (!File.Exists(path))
+                {
+                    Console.WriteLine($"File not found: {path}");
+                    return;
+                }
+
+                try
+                {
+                    _paperTape.EnqueueInputFile(path);
+                    Console.WriteLine($"Queued {_paperTape.PendingInput} byte(s) for PTR.");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"PTR read failed: {ex.Message}");
+                }
+                break;
+            case "status":
+                Console.WriteLine($"PTR queued bytes: {_paperTape.PendingInput}");
+                break;
+            default:
+                Console.WriteLine($"Unknown ptr command '{subcommand}'.");
+                break;
+        }
+    }
+
+    private void HandlePtp(string[] args)
+    {
+        if (_paperTape is null)
+        {
+            Console.WriteLine("Paper tape not configured.");
+            return;
+        }
+
+        if (args.Length < 1)
+        {
+            Console.WriteLine("Usage: ptp <attach|status> ...");
+            return;
+        }
+
+        var subcommand = args[0].ToLowerInvariant();
+        switch (subcommand)
+        {
+            case "attach":
+                if (args.Length < 2)
+                {
+                    Console.WriteLine("Usage: ptp attach <filename>");
+                    return;
+                }
+
+                _paperTape.SetPunchPath(args[1]);
+                Console.WriteLine($"PTP output set to {_paperTape.PunchPath}");
+                break;
+            case "status":
+                Console.WriteLine($"PTP output: {_paperTape.PunchPath}");
+                break;
+            default:
+                Console.WriteLine($"Unknown ptp command '{subcommand}'.");
+                break;
+        }
+    }
+
+    private void HandleLpt(string[] args)
+    {
+        if (_linePrinter is null)
+        {
+            Console.WriteLine("Line printer not configured.");
+            return;
+        }
+
+        if (args.Length < 1)
+        {
+            Console.WriteLine("Usage: lpt status");
+            return;
+        }
+
+        var subcommand = args[0].ToLowerInvariant();
+        switch (subcommand)
+        {
+            case "status":
+                Console.WriteLine($"LPT output: {_linePrinter.OutputPath}");
+                break;
+            default:
+                Console.WriteLine($"Unknown lpt command '{subcommand}'.");
+                break;
+        }
+    }
+
     private void AssembleFileCommand(string[] args)
     {
         if (args.Length == 0)
@@ -994,6 +1121,9 @@ public class NovaMonitor
             ["sample"] = "sample               Load a small counting demo at 0200",
             ["asm"] = "asm <file> [addr]    Assemble file and load into memory",
             ["tty"] = "tty read <file>      Queue input bytes for console TTI",
+            ["ptr"] = "ptr read <file>      Queue input bytes for paper tape reader",
+            ["ptp"] = "ptp attach <file>    Set output file for paper tape punch",
+            ["lpt"] = "lpt status           Show line printer output path",
             ["wdt"] = "wdt <cmd> [args]     Configure watchdog timer",
             ["exit"] = "exit                 Quit the monitor"
         };
@@ -1010,6 +1140,9 @@ public class NovaMonitor
         {
             8 => "TTI (console input)",
             9 => "TTO (console output)",
+            10 => "PTR (paper tape reader)",
+            11 => "PTP (paper tape punch)",
+            12 => "LPT (line printer)",
             _ => device switch
             {
                 NovaWatchdogDevice => "WDT watchdog",
