@@ -5,7 +5,7 @@ INIT:   LDA AC1, STRPTR
 
 LOOP:   LDA AC0, @W  ; Load character from string
         NIOC AC0, TTO     ; Clear TTO flags (optional but safe)
-        DOA AC0, TTO      ; Send AC0 to TTO
+        DOAS AC0, TTO      ; Send AC0 to TTO
 	LDA AC0, @SLOWMEM  ; Read Slowly
 
 WAIT:   SKPDN TTO         ; Skip next instruction if TTO is DONE

@@ -636,10 +636,20 @@ LIMIT:  DW 0
             Console.WriteLine("Sample assembly failed:");
             foreach (var diag in result.Diagnostics)
             {
-                Console.WriteLine($"  Line {diag.LineNumber}: {diag.Message}");
+                var label = diag.Severity == DiagnosticSeverity.Warning ? "warning" : "error";
+                Console.WriteLine($"  Line {diag.LineNumber} ({label}): {diag.Message}");
             }
 
             return;
+        }
+
+        if (result.Diagnostics.Count > 0)
+        {
+            Console.WriteLine("Sample assembly warnings:");
+            foreach (var diag in result.Diagnostics.Where(diag => diag.Severity == DiagnosticSeverity.Warning))
+            {
+                Console.WriteLine($"  Line {diag.LineNumber} (warning): {diag.Message}");
+            }
         }
 
         foreach (var word in result.Words)
@@ -848,10 +858,20 @@ LIMIT:  DW 0
             Console.WriteLine("Assembly failed:");
             foreach (var diag in result.Diagnostics)
             {
-                Console.WriteLine($"  line {diag.LineNumber}: {diag.Message}");
+                var label = diag.Severity == DiagnosticSeverity.Warning ? "warning" : "error";
+                Console.WriteLine($"  line {diag.LineNumber} ({label}): {diag.Message}");
             }
 
             return;
+        }
+
+        if (result.Diagnostics.Count > 0)
+        {
+            Console.WriteLine("Assembly warnings:");
+            foreach (var diag in result.Diagnostics.Where(diag => diag.Severity == DiagnosticSeverity.Warning))
+            {
+                Console.WriteLine($"  line {diag.LineNumber} (warning): {diag.Message}");
+            }
         }
 
         foreach (var word in result.Words)

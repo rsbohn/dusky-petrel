@@ -73,11 +73,15 @@ public sealed class NovaAssembler
             {
                 if (!IsValidLabel(labelSplit.Label))
                 {
-                    result.Diagnostics.Add(new AssemblerDiagnostic(lineNumber, $"Invalid label '{labelSplit.Label}'."));
+                    result.Diagnostics.Add(new AssemblerDiagnostic(lineNumber, DiagnosticSeverity.Error, $"Invalid label '{labelSplit.Label}'."));
                 }
                 else if (!symbols.TryAdd(labelSplit.Label, location))
                 {
-                    result.Diagnostics.Add(new AssemblerDiagnostic(lineNumber, $"Duplicate label '{labelSplit.Label}'."));
+                    var existingValue = symbols[labelSplit.Label];
+                    result.Diagnostics.Add(new AssemblerDiagnostic(
+                        lineNumber,
+                        DiagnosticSeverity.Warning,
+                        $"Symbol '{labelSplit.Label}' already defined as {FormatOctal(existingValue)}; keeping original value."));
                 }
             }
 
@@ -93,7 +97,7 @@ public sealed class NovaAssembler
                 {
                     if (!string.IsNullOrEmpty(textError))
                     {
-                        result.Diagnostics.Add(new AssemblerDiagnostic(lineNumber, textError));
+                        result.Diagnostics.Add(new AssemblerDiagnostic(lineNumber, DiagnosticSeverity.Error, textError));
                     }
                     else
                     {
@@ -116,13 +120,13 @@ public sealed class NovaAssembler
             {
                 if (tokens.Count < 2)
                 {
-                    result.Diagnostics.Add(new AssemblerDiagnostic(lineNumber, "ORG requires an address expression."));
+                    result.Diagnostics.Add(new AssemblerDiagnostic(lineNumber, DiagnosticSeverity.Error, "ORG requires an address expression."));
                     continue;
                 }
 
                 if (!TryEvaluateExpression(tokens[1], symbols, out var orgValue, out var orgError))
                 {
-                    result.Diagnostics.Add(new AssemblerDiagnostic(lineNumber, orgError));
+                    result.Diagnostics.Add(new AssemblerDiagnostic(lineNumber, DiagnosticSeverity.Error, orgError));
                     continue;
                 }
 
@@ -134,7 +138,7 @@ public sealed class NovaAssembler
             {
                 if (tokens.Count < 2)
                 {
-                    result.Diagnostics.Add(new AssemblerDiagnostic(lineNumber, "DW requires at least one value."));
+                    result.Diagnostics.Add(new AssemblerDiagnostic(lineNumber, DiagnosticSeverity.Error, "DW requires at least one value."));
                     continue;
                 }
 
@@ -158,7 +162,7 @@ public sealed class NovaAssembler
                 {
                     if (!TryEvaluateExpression(item.Operands[i], symbols, out var value, out var error))
                     {
-                        result.Diagnostics.Add(new AssemblerDiagnostic(item.LineNumber, error));
+                        result.Diagnostics.Add(new AssemblerDiagnostic(item.LineNumber, DiagnosticSeverity.Error, error));
                         continue;
                     }
 
@@ -178,7 +182,7 @@ public sealed class NovaAssembler
                     var ch = text[i];
                     if (ch > 0x7F)
                     {
-                        result.Diagnostics.Add(new AssemblerDiagnostic(item.LineNumber, "TXT supports ASCII characters only."));
+                        result.Diagnostics.Add(new AssemblerDiagnostic(item.LineNumber, DiagnosticSeverity.Error, "TXT supports ASCII characters only."));
                         ch = '?';
                     }
 
@@ -192,7 +196,7 @@ public sealed class NovaAssembler
 
             if (!TryAssembleInstruction(item, symbols, out var instruction, out var instError))
             {
-                result.Diagnostics.Add(new AssemblerDiagnostic(item.LineNumber, instError));
+                result.Diagnostics.Add(new AssemblerDiagnostic(item.LineNumber, DiagnosticSeverity.Error, instError));
                 continue;
             }
 
@@ -1335,12 +1339,18 @@ public sealed class AssemblerResult
     public List<AssemblerDiagnostic> Diagnostics { get; } = new();
     public List<AssembledWord> Words { get; } = new();
     public ushort? StartAddress { get; set; }
-    public bool Success => Diagnostics.Count == 0;
+    public bool Success => Diagnostics.All(d => d.Severity != DiagnosticSeverity.Error);
 }
 
 public readonly record struct AssembledWord(ushort Address, ushort Value, int LineNumber);
 
-public readonly record struct AssemblerDiagnostic(int LineNumber, string Message);
+public enum DiagnosticSeverity
+{
+    Warning,
+    Error
+}
+
+public readonly record struct AssemblerDiagnostic(int LineNumber, DiagnosticSeverity Severity, string Message);
 
 internal enum AsmItemKind
 {
