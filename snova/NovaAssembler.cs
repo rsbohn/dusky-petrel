@@ -45,6 +45,24 @@ public sealed class NovaAssembler
                 continue;
             }
 
+            if (TryParseTextDirective(text, out var textLiteral, out var textError, out var isText))
+            {
+                if (isText)
+                {
+                    if (!string.IsNullOrEmpty(textError))
+                    {
+                        result.Diagnostics.Add(new AssemblerDiagnostic(lineNumber, textError));
+                    }
+                    else
+                    {
+                        items.Add(new AsmItem(AsmItemKind.Text, lineNumber, location, ".TXT", new[] { textLiteral }));
+                        location += textLiteral.Length;
+                    }
+
+                    continue;
+                }
+            }
+
             var tokens = Tokenize(text);
             if (tokens.Count == 0)
             {
@@ -102,6 +120,26 @@ public sealed class NovaAssembler
 
                     var addr = (ushort)((item.Address + i) & NovaCpu.AddressMask);
                     var word = (ushort)(value & NovaCpu.WordMask);
+                    result.Words.Add(new AssembledWord(addr, word, item.LineNumber));
+                }
+
+                continue;
+            }
+
+            if (item.Kind == AsmItemKind.Text)
+            {
+                var text = item.Operands.Length > 0 ? item.Operands[0] : string.Empty;
+                for (var i = 0; i < text.Length; i++)
+                {
+                    var ch = text[i];
+                    if (ch > 0x7F)
+                    {
+                        result.Diagnostics.Add(new AssemblerDiagnostic(item.LineNumber, "TXT supports ASCII characters only."));
+                        ch = '?';
+                    }
+
+                    var addr = (ushort)((item.Address + i) & NovaCpu.AddressMask);
+                    var word = (ushort)(ch & 0xFF);
                     result.Words.Add(new AssembledWord(addr, word, item.LineNumber));
                 }
 
@@ -747,6 +785,71 @@ public sealed class NovaAssembler
         return tokens;
     }
 
+    private static bool TryParseTextDirective(
+        string line,
+        out string text,
+        out string error,
+        out bool isTextDirective)
+    {
+        text = string.Empty;
+        error = string.Empty;
+        isTextDirective = false;
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return true;
+        }
+
+        var trimmed = line.Trim();
+        var tokenEnd = 0;
+        while (tokenEnd < trimmed.Length && !char.IsWhiteSpace(trimmed[tokenEnd]))
+        {
+            tokenEnd++;
+        }
+
+        var token = trimmed[..tokenEnd];
+        if (!IsDirective(token, "txt"))
+        {
+            return true;
+        }
+
+        isTextDirective = true;
+        var rest = trimmed[tokenEnd..].Trim();
+        if (string.IsNullOrEmpty(rest))
+        {
+            error = "TXT requires /string/.";
+            return true;
+        }
+
+        var firstSlash = rest.IndexOf('/');
+        if (firstSlash < 0)
+        {
+            error = "TXT requires /string/.";
+            return true;
+        }
+
+        var lastSlash = rest.LastIndexOf('/');
+        if (lastSlash == firstSlash)
+        {
+            error = "TXT requires a closing '/'.";
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(rest[..firstSlash]))
+        {
+            error = "TXT expects /string/.";
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(rest[(lastSlash + 1)..]))
+        {
+            error = "TXT supports only a single /string/.";
+            return true;
+        }
+
+        text = rest.Substring(firstSlash + 1, lastSlash - firstSlash - 1);
+        return true;
+    }
+
     private static bool TryEvaluateExpression(
         string expr,
         Dictionary<string, int> symbols,
@@ -978,5 +1081,6 @@ public readonly record struct AssemblerDiagnostic(int LineNumber, string Message
 internal enum AsmItemKind
 {
     Word,
+    Text,
     Instruction
 }

@@ -46,6 +46,7 @@ Blocks are 129 words (128 data + 1 spare). Drives are `TC0` and `TC1`.
 - I/O group: top bits `15..13 = 011` (0x6000 mask).
 - Console devices: `TTI` = `0o10` (8), `TTO` = `0o11` (9).
 - Slow memory: reads from `0o77760` to `0o77767` pause for 100 ms.
+- RTC device: `0o21` (17). `DIA` = minutes since midnight (UTC), `DIB`/`DIC` = epoch seconds (low/high, epoch 2000-01-01).
 
 ## Samples
 

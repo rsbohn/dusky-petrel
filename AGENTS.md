@@ -16,6 +16,7 @@
 - Monitor command `tty read <file>` queues input and appends ASCII EOT (0x04).
 - Slow memory: `0o77760`–`0o77767` reads pause for 100 ms.
 - TC08: monitor commands `tc status`, `tc0 attach|read|write`, `tc1 attach|read|write`.
+- RTC: device `0o21` (17) provides minutes since midnight (DIA) and epoch seconds since 2000-01-01 (DIB/DIC low/high).
 
 ## Assembler
 - Use the built-in assembler via `asm <file> [addr]`.

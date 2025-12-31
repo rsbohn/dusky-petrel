@@ -51,6 +51,18 @@ public sealed class NovaIoBus
         _devices[device.DeviceCode & 0x3F] = device;
     }
 
+    public List<(int DeviceCode, INovaIoDevice Device)> GetDevices()
+    {
+        var devices = new List<(int DeviceCode, INovaIoDevice Device)>();
+        foreach (var kvp in _devices)
+        {
+            devices.Add((kvp.Key, kvp.Value));
+        }
+
+        devices.Sort((left, right) => left.DeviceCode.CompareTo(right.DeviceCode));
+        return devices;
+    }
+
     public bool TryExecute(NovaIoOp op, ref ushort accumulator, out bool skip)
     {
         skip = false;

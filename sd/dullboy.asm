@@ -3,9 +3,13 @@
 INIT:   LDA AC1, STRPTR
         STA AC1, PTR
 
-LOOP:   LDA AC0, @PTR
-        DOA TTO
-        JSR 3, BUSY
+LOOP:   LDA AC0, @PTR     ; Load character from string
+        NIO.C TTO         ; Clear TTO flags (optional but safe)
+        DOA AC0, TTO      ; Send AC0 to TTO
+
+WAIT:   SKPDN TTO         ; Skip next instruction if TTO is DONE
+        BR WAIT           ; Not done? Jump back and wait
+
         LDA AC1, PTR
         LDAI AC3, 0
         ADDI AC1, 1
@@ -16,30 +20,9 @@ LOOP:   LDA AC0, @PTR
         BZ AC2, INIT
         BR LOOP
 
-; ------------------------------------------------------------
-; BUSY — slow-memory delay
-; Consumes time between characters by reading slow memory.
-; AC0 is clobbered.
-; ------------------------------------------------------------
-
-BUSY:
-        STA     3, RETADR        ; save return address from AC3
-        LDA     0, @SLOWMEM       ; 100 ms read from slow-memory bank
-        ;STA     0, SLOWMEM
-        ;LDA     0, SLOWMEM
-        ;STA     0, SLOWMEM
-        BR      @RETADR          ; return via saved AC3
-
-SLOWMEM: .WORD  0o77760
-RETADR: DW 0
-
 PTR:    DW 0
 STRPTR: DW STR
 ENDADDR: DW STR_END
-STR:    DW 0x41, 0x6C, 0x6C, 0x20, 0x77, 0x6F, 0x72, 0x6B
-        DW 0x20, 0x61, 0x6E, 0x64, 0x20, 0x6E, 0x6F, 0x20
-        DW 0x70, 0x6C, 0x61, 0x79, 0x20, 0x6D, 0x61, 0x6B
-        DW 0x65, 0x20, 0x4A, 0x61, 0x63, 0x6B, 0x20, 0x61
-        DW 0x20, 0x64, 0x75, 0x6C, 0x6C, 0x20, 0x62, 0x6F
-        DW 0x79, 0x2E, 0x0D, 0x0A
+STR:    .TXT /All work and no play makes Jack a dull boy./
+        DW 0x0D, 0x0A
 STR_END: DW 0

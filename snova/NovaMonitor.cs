@@ -12,6 +12,7 @@ public class NovaMonitor
     private readonly NovaConsoleTty? _tty;
     private readonly NovaWatchdogDevice? _watchdog;
     private readonly Tc08? _tc08;
+    private readonly NovaRtcDevice? _rtc;
     private readonly HashSet<ushort> _breakpoints = new();
     private readonly Dictionary<string, string> _helpText;
 
@@ -19,12 +20,14 @@ public class NovaMonitor
         NovaCpu cpu,
         NovaConsoleTty? tty = null,
         NovaWatchdogDevice? watchdog = null,
-        Tc08? tc08 = null)
+        Tc08? tc08 = null,
+        NovaRtcDevice? rtc = null)
     {
         _cpu = cpu;
         _tty = tty;
         _watchdog = watchdog;
         _tc08 = tc08;
+        _rtc = rtc;
         _cpu.Reset();
         _watchdog?.ResetDeviceState();
         _helpText = BuildHelp();
@@ -104,6 +107,12 @@ public class NovaMonitor
             case "tc1":
                 HandleTcUnit(1, args);
                 break;
+            case "rtc":
+                HandleRtc(args);
+                break;
+            case "devices":
+                ShowDevices();
+                break;
             case "break":
             case "b":
                 ToggleBreakpoint(args);
@@ -157,6 +166,44 @@ public class NovaMonitor
         {
             Console.WriteLine($"No help entry for '{key}'.");
         }
+    }
+
+    private void ShowDevices()
+    {
+        var devices = _cpu.IoBus.GetDevices();
+        if (devices.Count == 0)
+        {
+            Console.WriteLine("No devices attached.");
+            return;
+        }
+
+        Console.WriteLine("Attached devices:");
+        foreach (var (deviceCode, device) in devices)
+        {
+            Console.WriteLine($"  {FormatDeviceCode(deviceCode)} {DescribeDevice(deviceCode, device)}");
+        }
+    }
+
+    private void HandleRtc(string[] args)
+    {
+        if (_rtc is null)
+        {
+            Console.WriteLine("RTC device not configured.");
+            return;
+        }
+
+        if (args.Length != 1 || !args[0].Equals("status", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine("Usage: rtc status");
+            return;
+        }
+
+        var minutes = _rtc.ReadMinutesSinceMidnight();
+        var epochSeconds = _rtc.ReadEpochSeconds();
+        var deviceCode = FormatDeviceCode(_rtc.DeviceCode);
+        Console.WriteLine($"RTC device: {deviceCode}");
+        Console.WriteLine($"minutes_since_midnight={minutes}");
+        Console.WriteLine($"epoch_seconds={epochSeconds}");
     }
 
     private void Reset(string[] args)
@@ -294,13 +341,15 @@ public class NovaMonitor
 
             var step = _cpu.Step();
             executed++;
-            if (step.Halted)
-            {
-                RenderStep(step);
-                break;
-            }
+        if (step.Halted)
+        {
+            RenderStep(step);
+            break;
         }
+    }
 
+        var utcNow = DateTime.UtcNow;
+        Console.WriteLine($"UTC {utcNow:HH:mm:ss}");
         var haltReason = string.IsNullOrWhiteSpace(_cpu.HaltReason) ? string.Empty : $" ({_cpu.HaltReason})";
         Console.WriteLine($"Stopped after {executed} step(s). PC={NovaCpu.FormatWord(_cpu.ProgramCounter)} HALT={_cpu.Halted}{haltReason}");
     }
@@ -934,6 +983,8 @@ public class NovaMonitor
             ["step"] = "step [n]             Step through n instructions",
             ["run"] = "run [n]              Run until HALT/breakpoint or n instructions",
             ["go"] = "go <addr> [n]        Set PC and run until HALT/breakpoint or n instructions",
+            ["devices"] = "devices              List attached I/O devices",
+            ["rtc"] = "rtc status            Show RTC status",
             ["tc"] = "tc status            Show TC08 drive status",
             ["tc0"] = "tc0 <cmd> ...        TC08 unit 0 (attach/read/write/verify)",
             ["tc1"] = "tc1 <cmd> ...        TC08 unit 1 (attach/read/write/verify)",
@@ -945,6 +996,27 @@ public class NovaMonitor
             ["tty"] = "tty read <file>      Queue input bytes for console TTI",
             ["wdt"] = "wdt <cmd> [args]     Configure watchdog timer",
             ["exit"] = "exit                 Quit the monitor"
+        };
+    }
+
+    private static string FormatDeviceCode(int deviceCode)
+    {
+        return Convert.ToString(deviceCode & 0x3F, 8).PadLeft(2, '0');
+    }
+
+    private static string DescribeDevice(int deviceCode, INovaIoDevice device)
+    {
+        return deviceCode switch
+        {
+            8 => "TTI (console input)",
+            9 => "TTO (console output)",
+            _ => device switch
+            {
+                NovaWatchdogDevice => "WDT watchdog",
+                NovaTc08Device => "TC08 tape",
+                NovaRtcDevice => "RTC clock",
+                _ => device.GetType().Name
+            }
         };
     }
 
