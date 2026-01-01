@@ -98,6 +98,10 @@ public class NovaMonitor
             case "s":
                 Step(args);
                 break;
+            case "trace":
+            case "t":
+                Trace(args);
+                break;
             case "run":
                 RunUntilHalt(args);
                 break;
@@ -315,6 +319,43 @@ public class NovaMonitor
             if (_breakpoints.Contains(_cpu.ProgramCounter))
             {
                 Console.WriteLine($"Reached breakpoint at {NovaCpu.FormatWord(_cpu.ProgramCounter)}");
+                break;
+            }
+        }
+    }
+
+    private void Trace(string[] args)
+    {
+        var count = 1;
+        if (args.Length > 0)
+        {
+            if (!TryParseNumber(args[0], out var parsed))
+            {
+                Console.WriteLine("Usage: trace [n]");
+                return;
+            }
+
+            count = parsed;
+        }
+
+        if (_cpu.Halted)
+        {
+            _cpu.Resume();
+        }
+
+        for (var i = 0; i < count; i++)
+        {
+            if (_breakpoints.Contains(_cpu.ProgramCounter))
+            {
+                Console.WriteLine($"Breakpoint hit at {NovaCpu.FormatWord(_cpu.ProgramCounter)}");
+                break;
+            }
+
+            var step = _cpu.Step();
+            RenderStep(step);
+            Console.WriteLine(FormatTraceRegisters());
+            if (step.Halted)
+            {
                 break;
             }
         }
@@ -603,7 +644,7 @@ public class NovaMonitor
         {
             var address = (ushort)(start + i);
             var instruction = _cpu.ReadMemory(address);
-            var text = DisassembleWord(address, instruction);
+            var text = NovaDisassembler.DisassembleWord(address, instruction);
             Console.WriteLine(text);
         }
     }
@@ -1026,129 +1067,18 @@ LIMIT:  DW 0
         Console.WriteLine($"{pcText}: {instText}  {step.Description}");
     }
 
-    private string DisassembleWord(ushort address, ushort instruction)
+    private string FormatTraceRegisters()
     {
-        if ((instruction & 0xE000) == 0x6000)
-        {
-            return FormatInstruction(address, instruction, DisassembleIo(instruction));
-        }
-
-        if ((instruction & 0x8000) != 0)
-        {
-            return FormatInstruction(address, instruction, DisassembleOperate(instruction));
-        }
-
-        return FormatInstruction(address, instruction, DisassembleMrf(address, instruction));
+        var ac0 = NovaCpu.FormatWord(_cpu.Accumulators[0]);
+        var ac1 = NovaCpu.FormatWord(_cpu.Accumulators[1]);
+        var ac2 = NovaCpu.FormatWord(_cpu.Accumulators[2]);
+        var ac3 = NovaCpu.FormatWord(_cpu.Accumulators[3]);
+        var pc = NovaCpu.FormatWord(_cpu.ProgramCounter);
+        var link = _cpu.Link ? 1 : 0;
+        var halted = _cpu.Halted ? "T" : "F";
+        return $"[{ac0} {ac1} {ac2} {ac3}] PC={pc} L={link} H={halted}";
     }
 
-    private string DisassembleIo(ushort instruction)
-    {
-        var ac = (instruction >> 11) & 0x3;
-        var function = (instruction >> 8) & 0x7;
-        var pulse = (instruction >> 6) & 0x3;
-        var device = instruction & 0x3F;
-        var deviceText = Convert.ToString(device, 8).PadLeft(2, '0');
-        return function switch
-        {
-            0 => $"NIO {FormatSignal(pulse)}{deviceText}",
-            1 => $"DIA AC{ac}, {deviceText}",
-            2 => $"DOA AC{ac}, {deviceText}",
-            3 => $"DIB AC{ac}, {deviceText}",
-            4 => $"DOB AC{ac}, {deviceText}",
-            5 => $"DIC AC{ac}, {deviceText}",
-            6 => $"DOC AC{ac}, {deviceText}",
-            _ => pulse switch
-            {
-                0 => $"SKPBN {deviceText}",
-                1 => $"SKPBZ {deviceText}",
-                2 => $"SKPDN {deviceText}",
-                _ => $"SKPDZ {deviceText}"
-            }
-        };
-    }
-
-    private string DisassembleMrf(ushort address, ushort instruction)
-    {
-        var opac = (instruction >> 11) & 0x1F;
-        var indirect = (instruction & 0x0400) != 0;
-        var mode = (instruction >> 8) & 0x3;
-        var displacement = instruction & 0xFF;
-        var operand = FormatSimhOperand((ushort)(address + 1), indirect, mode, displacement);
-
-        return opac switch
-        {
-            0 => $"JMP {operand}",
-            1 => $"JMS {operand}",
-            2 => $"ISZ {operand}",
-            3 => $"DSZ {operand}",
-            4 => $"LDA AC0, {operand}",
-            5 => $"LDA AC1, {operand}",
-            6 => $"LDA AC2, {operand}",
-            7 => $"LDA AC3, {operand}",
-            8 => $"STA AC0, {operand}",
-            9 => $"STA AC1, {operand}",
-            10 => $"STA AC2, {operand}",
-            11 => $"STA AC3, {operand}",
-            _ => $"DW {NovaCpu.FormatWord(instruction)}"
-        };
-    }
-
-    private static string DisassembleOperate(ushort instruction)
-    {
-        var src = (instruction >> 13) & 0x3;
-        var dst = (instruction >> 11) & 0x3;
-        var alu = (instruction >> 8) & 0x7;
-        var shift = (instruction >> 6) & 0x3;
-        var carry = (instruction >> 4) & 0x3;
-        var noLoad = (instruction & 0x8) != 0;
-        var skip = instruction & 0x7;
-
-        var aluNames = new[] { "COM", "NEG", "MOV", "INC", "ADC", "SUB", "ADD", "AND" };
-        var shiftNames = new[] { string.Empty, "L", "R", "S" };
-        var carryNames = new[] { string.Empty, "CL", "SET", "CMP" };
-        var skipNames = new[] { string.Empty, "SKP", "SZC", "SNC", "SZR", "SNR", "SEZ", "SBN" };
-
-        var text = $"{aluNames[alu]} AC{src}, AC{dst}";
-        if (shift != 0)
-        {
-            text += $" {shiftNames[shift]}";
-        }
-
-        if (carry != 0)
-        {
-            text += $" {carryNames[carry]}";
-        }
-
-        if (noLoad)
-        {
-            text += " NL";
-        }
-
-        if (skip != 0)
-        {
-            text += $" {skipNames[skip]}";
-        }
-
-        return text;
-    }
-
-    private string FormatInstruction(ushort address, ushort instruction, string text)
-    {
-        return $"{NovaCpu.FormatWord(address)}: {NovaCpu.FormatWord(instruction)} {text}";
-    }
-
-    private string FormatEffective(ushort pc, bool page, bool indirect, ushort offset)
-    {
-        var baseAddress = page ? (pc & NovaCpu.PageMask) : 0;
-        var target = (ushort)((baseAddress | offset) & NovaCpu.AddressMask);
-        var text = $"{NovaCpu.FormatWord(target)}";
-        if (indirect)
-        {
-            text += " (I)";
-        }
-
-        return text;
-    }
 
     private static bool TryParseNumber(string text, out ushort value)
     {
@@ -1199,6 +1129,7 @@ LIMIT:  DW 0
             ["exam"] = "exam <addr> [n]      Examine n words from addr",
             ["deposit"] = "deposit <addr> <v>  Store value at address",
             ["step"] = "step [n]             Step through n instructions",
+            ["trace"] = "trace [n]            Trace n instructions with registers",
             ["run"] = "run [n]              Run until HALT/breakpoint or n instructions",
             ["go"] = "go <addr> [n]        Set PC and run until HALT/breakpoint or n instructions",
             ["devices"] = "devices              List attached I/O devices",
@@ -1333,68 +1264,6 @@ LIMIT:  DW 0
         }
     }
 
-    private static string FormatSignal(int signal)
-    {
-        return signal switch
-        {
-            1 => "S, ",
-            2 => "C, ",
-            3 => "P, ",
-            _ => string.Empty
-        };
-    }
-
-    private static string FormatSimhOperand(ushort pc, bool indirect, int mode, int displacement)
-    {
-        string text;
-        switch (mode)
-        {
-            case 0:
-                text = NovaCpu.FormatWord((ushort)displacement);
-                break;
-            case 1:
-                {
-                    var ea = (ushort)((pc + SignExtend8(displacement)) & NovaCpu.AddressMask);
-                    text = NovaCpu.FormatWord(ea);
-                    break;
-                }
-            case 2:
-                text = $"{FormatSignedDisplacement(displacement)},AC2";
-                break;
-            default:
-                text = $"{FormatSignedDisplacement(displacement)},AC3";
-                break;
-        }
-
-        return indirect ? $"@{text}" : text;
-    }
-
-    private static string FormatSignedDisplacement(int displacement)
-    {
-        var signed = (sbyte)(displacement & 0xFF);
-        if (signed < 0)
-        {
-            return $"-0o{Convert.ToString(-signed, 8)}";
-        }
-
-        if (signed == 0)
-        {
-            return "0";
-        }
-
-        return $"0o{Convert.ToString(signed, 8)}";
-    }
-
-    private static short SignExtend8(int value)
-    {
-        var masked = value & 0xFF;
-        if ((masked & 0x80) != 0)
-        {
-            return (short)(masked | unchecked((short)0xFF00));
-        }
-
-        return (short)masked;
-    }
 
     private static string ComputeMd5(string path)
     {

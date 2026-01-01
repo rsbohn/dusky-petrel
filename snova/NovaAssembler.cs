@@ -602,10 +602,11 @@ public sealed class NovaAssembler
             return true;
         }
 
-        var delta = dispValue - pc;
+        var basePc = (pc + 1) & NovaCpu.AddressMask;
+        var delta = dispValue - basePc;
         if (delta < -SimhDispSign || delta > SimhDispSign - 1)
         {
-            error = $"Address {FormatOctal(dispValue)} not reachable from PC {FormatOctal(pc)}.";
+            error = $"Address {FormatOctal(dispValue)} not reachable from PC {FormatOctal(basePc)}.";
             return false;
         }
 
