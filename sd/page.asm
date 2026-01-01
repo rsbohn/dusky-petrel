@@ -5,13 +5,53 @@
 ; 2000: word word word word word word word word
 
         ORG 0o2000
-START:  LDA AC0, CHAR
+START:  LDA AC0, LPERP
+        STA AC0, LCOUNT
+ ML:    LDA AC0, @ADDR
         JSR OPRINT
+        LDA AC0, COLON
+        JSR PUTCH
+        LDA AC0, SPACE
+        JSR PUTCH
+        JSR PLINE
         JSR CRLF
+        DSZ LCOUNT
+        JMP ML
         HALT
         JMP START
-CHAR:   DW 0101
+ADDR:   DW 00020
+COLON:  DW 0072         ; ':'
+SPACE:  DW 0040         ; ' '
+WPERLI: DW 010          ; words per line
+LPERP:  DW 010          ; lines per 'page'
+LCOUNT: DW 0
 
+; Print Line -- uses AC0 AC1 ZP:0021
+PLINE:  STA AC3, PLINE_RET
+        LDA AC0, WPERLI
+        STA AC0, WCOUNT
+        LDA AC0, @ADDR
+        STA AC0, LPP
+PLOOP:  LDA AC0, @LPP
+        JSR OPRINT
+        LDA AC0, SPACE
+        JSR PUTCH
+        LDA AC0, LPP
+        INC AC0, AC0
+        STA AC0, LPP
+        DSZ WCOUNT
+        JMP PLOOP
+        LDA AC0, @ADDR
+        LDA AC1, WPERLI
+        ADD AC1, AC0
+        STA AC0, @ADDR
+        JMP @PLINE_RET
+PLINE_RET: DW 0
+LPP:    DW 0
+WCOUNT: DW 0
+        
+
+; Uses AC0 AC1 AC2
 OPRINT: STA AC3, FLEET
         STA AC0, W
         LDA AC2, NUMZ
@@ -33,18 +73,15 @@ OPR_LOOP:
         JMP OPR_LOOP
 
         LDA AC2, NUM6
+        LDA AC1, SIX
+        STA AC1, COUNT
+        LDA AC1, ONE
+OPR_PUT_LOOP:
         LDA AC0, 1,AC2
         JSR PUTCH
-        LDA AC0, 2,AC2
-        JSR PUTCH
-        LDA AC0, 3,AC2
-        JSR PUTCH
-        LDA AC0, 4,AC2
-        JSR PUTCH
-        LDA AC0, 5,AC2
-        JSR PUTCH
-        LDA AC0, 6,AC2
-        JSR PUTCH
+        ADD AC1, AC2
+        DSZ COUNT
+        JMP OPR_PUT_LOOP
         LDA AC0, W
         JMP @FLEET
 FLEET:  DW 0    ; holds the return address
