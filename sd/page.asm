@@ -14,48 +14,23 @@ CHAR:   DW 0101
 
 OPRINT: STA AC3, FLEET
         STA AC0, W
-        JSR DIGIT
-        STA AC0, NUM6+6
+        LDA AC2, NUMZ
+        LDA AC1, SIX
+        STA AC1, COUNT
 
+OPR_LOOP:
+        LDA AC0, W
+        JSR DIGIT
+        STA AC0, 0,AC2
         LDA AC0, W
         MOVR AC0, AC0
         MOVR AC0, AC0
         MOVR AC0, AC0
         STA AC0, W
-        JSR DIGIT
-        STA AC0, NUM6+5
-
-        LDA AC0, W
-        MOVR AC0, AC0
-        MOVR AC0, AC0
-        MOVR AC0, AC0
-        STA AC0, W
-        JSR DIGIT
-        STA AC0, NUM6+4
-
-        LDA AC0, W
-        MOVR AC0, AC0
-        MOVR AC0, AC0
-        MOVR AC0, AC0
-        STA AC0, W
-        JSR DIGIT
-        STA AC0, NUM6+3
-
-        LDA AC0, W
-        MOVR AC0, AC0
-        MOVR AC0, AC0
-        MOVR AC0, AC0
-        STA AC0, W
-        JSR DIGIT
-        STA AC0, NUM6+2
-
-        LDA AC0, W
-        MOVR AC0, AC0
-        MOVR AC0, AC0
-        MOVR AC0, AC0
-        STA AC0, W
-        JSR DIGIT
-        STA AC0, NUM6+1
+        LDA AC1, ONE
+        SUBZ AC1, AC2
+        DSZ COUNT
+        JMP OPR_LOOP
 
         LDA AC2, NUM6
         LDA AC0, 1,AC2
@@ -76,6 +51,10 @@ FLEET:  DW 0    ; holds the return address
 W:      DW 0    ; holds AC0
 SEVEN:  DW 0007 ; mask
 AZERO:  DW 0060 ; ascii zero
+ONE:    DW 0001
+SIX:    DW 0006
+COUNT:  DW 0
+NUMZ:   DW NUM6+6
 NUM6:   DW NUM6
         .TXT /------/
 
