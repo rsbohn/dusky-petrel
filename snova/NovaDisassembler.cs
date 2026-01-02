@@ -23,6 +23,21 @@ public static class NovaDisassembler
         return DisassembleMrf(address, instruction);
     }
 
+    public static string DisassembleInstructionListing(ushort address, ushort instruction)
+    {
+        if ((instruction & 0xE000) == 0x6000)
+        {
+            return DisassembleIo(instruction);
+        }
+
+        if ((instruction & 0x8000) != 0)
+        {
+            return DisassembleOperate(instruction);
+        }
+
+        return DisassembleMrfListing(address, instruction);
+    }
+
     private static string DisassembleIo(ushort instruction)
     {
         var ac = (instruction >> 11) & 0x3;
@@ -92,7 +107,33 @@ public static class NovaDisassembler
         var indirect = (instruction & 0x0400) != 0;
         var mode = (instruction >> 8) & 0x3;
         var displacement = instruction & 0xFF;
-        var operand = FormatSimhOperand((ushort)(address + 1), indirect, mode, displacement);
+        var operand = FormatSimhOperand(address, indirect, mode, displacement);
+
+        return opac switch
+        {
+            0 => $"JMP {operand}",
+            1 => $"JSR {operand}",
+            2 => $"ISZ {operand}",
+            3 => $"DSZ {operand}",
+            4 => $"LDA AC0, {operand}",
+            5 => $"LDA AC1, {operand}",
+            6 => $"LDA AC2, {operand}",
+            7 => $"LDA AC3, {operand}",
+            8 => $"STA AC0, {operand}",
+            9 => $"STA AC1, {operand}",
+            10 => $"STA AC2, {operand}",
+            11 => $"STA AC3, {operand}",
+            _ => $"DW {NovaCpu.FormatWord(instruction)}"
+        };
+    }
+
+    private static string DisassembleMrfListing(ushort address, ushort instruction)
+    {
+        var opac = (instruction >> 11) & 0x1F;
+        var indirect = (instruction & 0x0400) != 0;
+        var mode = (instruction >> 8) & 0x3;
+        var displacement = instruction & 0xFF;
+        var operand = FormatSimhOperandListing(address, indirect, mode, displacement);
 
         return opac switch
         {
@@ -135,6 +176,37 @@ public static class NovaDisassembler
         }
 
         return indirect ? $"@{text}" : text;
+    }
+
+    private static string FormatSimhOperandListing(ushort pc, bool indirect, int mode, int displacement)
+    {
+        string text;
+        switch (mode)
+        {
+            case 0:
+                text = FormatListingAddress((ushort)displacement);
+                break;
+            case 1:
+                {
+                    var ea = (ushort)((pc + SignExtend8(displacement)) & NovaCpu.AddressMask);
+                    text = FormatListingAddress(ea);
+                    break;
+                }
+            case 2:
+                text = $"{FormatSignedDisplacement(displacement)},AC2";
+                break;
+            default:
+                text = $"{FormatSignedDisplacement(displacement)},AC3";
+                break;
+        }
+
+        return indirect ? $"@{text}" : text;
+    }
+
+    private static string FormatListingAddress(ushort value)
+    {
+        var octal = Convert.ToString(value & NovaCpu.AddressMask, 8);
+        return octal.Length < 4 ? octal.PadLeft(4, '0') : octal;
     }
 
     private static string FormatSignedDisplacement(int displacement)

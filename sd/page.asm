@@ -63,9 +63,9 @@ OPR_LOOP:
         JSR DIGIT
         STA AC0, 0,AC2
         LDA AC0, W
-        MOVR AC0, AC0
-        MOVR AC0, AC0
-        MOVR AC0, AC0
+        MOVZR AC0, AC0
+        MOVZR AC0, AC0
+        MOVZR AC0, AC0
         STA AC0, W
         LDA AC1, ONE
         SUBZ AC1, AC2

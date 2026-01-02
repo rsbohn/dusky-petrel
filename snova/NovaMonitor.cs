@@ -8,6 +8,11 @@ namespace Snova;
 
 public class NovaMonitor
 {
+    private const int TcIndexWordsPerEntry = 8;
+    private const int TcIndexLabelWords = 3;
+    private const int TcIndexLabelChars = 6;
+    private const int TcIndexEntries = Tc08.DataWordsPerBlock / TcIndexWordsPerEntry;
+
     private readonly NovaCpu _cpu;
     private readonly NovaConsoleTty? _tty;
     private readonly NovaWatchdogDevice? _watchdog;
@@ -17,6 +22,7 @@ public class NovaMonitor
     private readonly NovaLinePrinterDevice? _linePrinter;
     private readonly HashSet<ushort> _breakpoints = new();
     private readonly Dictionary<string, string> _helpText;
+    private readonly object _commandLock = new();
 
     public NovaMonitor(
         NovaCpu cpu,
@@ -57,11 +63,72 @@ public class NovaMonitor
                 continue;
             }
 
-            if (!HandleCommand(line.Trim()))
+            if (!ExecuteCommandLocal(line.Trim()))
             {
                 break;
             }
         }
+    }
+
+    public string ExecuteCommandLine(string line, bool allowExit)
+    {
+        var trimmed = line.Trim();
+        if (!allowExit && IsExitCommand(trimmed))
+        {
+            return "Exit is disabled on the unix console.\n";
+        }
+
+        using var writer = new StringWriter();
+        lock (_commandLock)
+        {
+            var originalOut = Console.Out;
+            var originalError = Console.Error;
+            try
+            {
+                Console.SetOut(writer);
+                Console.SetError(writer);
+                _ = HandleCommand(trimmed);
+            }
+            catch (Exception ex)
+            {
+                writer.WriteLine($"Unix console error: {ex.Message}");
+            }
+            finally
+            {
+                Console.SetOut(originalOut);
+                Console.SetError(originalError);
+            }
+        }
+
+        var response = writer.ToString();
+        if (string.IsNullOrEmpty(response))
+        {
+            response = "OK\n";
+        }
+
+        return response;
+    }
+
+    private bool ExecuteCommandLocal(string line)
+    {
+        lock (_commandLock)
+        {
+            return HandleCommand(line);
+        }
+    }
+
+    private static bool IsExitCommand(string line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return false;
+        }
+
+        var trimmed = line.Trim();
+        var spaceIndex = trimmed.IndexOf(' ');
+        var command = spaceIndex >= 0 ? trimmed[..spaceIndex] : trimmed;
+        command = command.ToLowerInvariant();
+        return command == "q" || command == "quit" || command == "exit";
     }
 
     private bool HandleCommand(string line)
@@ -473,7 +540,7 @@ public class NovaMonitor
 
         if (args.Length == 0)
         {
-            Console.WriteLine("Usage: tc0 <attach|read|write|verify> ...");
+            Console.WriteLine("Usage: tc0 <attach|read|write|verify|index> ...");
             return;
         }
 
@@ -493,9 +560,12 @@ public class NovaMonitor
             case "verify":
                 HandleTcVerify(unit, args.Skip(1).ToArray());
                 return;
+            case "index":
+                HandleTcIndex(unit, args.Skip(1).ToArray());
+                return;
         }
 
-        Console.WriteLine($"Usage: tc{unit} <attach|read|write|verify> ...");
+        Console.WriteLine($"Usage: tc{unit} <attach|read|write|verify|index> ...");
     }
 
     private void ShowTcStatus()
@@ -611,6 +681,182 @@ public class NovaMonitor
         }
 
         Console.WriteLine($"TC{unit}: verify found {mismatches} mismatch(es)");
+    }
+
+    private void HandleTcIndex(int unit, string[] args)
+    {
+        if (_tc08 is null)
+        {
+            Console.WriteLine("TC08 not configured.");
+            return;
+        }
+
+        if (args.Length == 0 || args[0].Equals("list", StringComparison.OrdinalIgnoreCase))
+        {
+            HandleTcIndexList(unit);
+            return;
+        }
+
+        var subcommand = args[0].ToLowerInvariant();
+        switch (subcommand)
+        {
+            case "set":
+                HandleTcIndexSet(unit, args.Skip(1).ToArray());
+                return;
+            case "clear":
+                HandleTcIndexClear(unit, args.Skip(1).ToArray());
+                return;
+            default:
+                Console.WriteLine($"Usage: tc{unit} index [list|set|clear] ...");
+                return;
+        }
+    }
+
+    private void HandleTcIndexList(int unit)
+    {
+        Span<ushort> buffer = stackalloc ushort[Tc08.WordsPerBlock];
+        if (!_tc08!.TryReadBlock(unit, 0, buffer, out var error))
+        {
+            if (error == "Block beyond end of tape.")
+            {
+                Console.WriteLine($"TC{unit}: no index block (block 0 missing).");
+                return;
+            }
+
+            Console.WriteLine($"TC{unit}: index read failed - {error}");
+            return;
+        }
+
+        Console.WriteLine($"TC{unit} index (block 0):");
+        for (var entry = 0; entry < TcIndexEntries; entry++)
+        {
+            var offset = entry * TcIndexWordsPerEntry;
+            var empty = true;
+            for (var i = 0; i < TcIndexWordsPerEntry; i++)
+            {
+                if (buffer[offset + i] != 0)
+                {
+                    empty = false;
+                    break;
+                }
+            }
+
+            var entryLabel = Convert.ToString(entry, 8).PadLeft(2, '0');
+            if (empty)
+            {
+                Console.WriteLine($"  {entryLabel}: <empty>");
+                continue;
+            }
+
+            var block = buffer[offset];
+            var addr = buffer[offset + 1];
+            var label = DecodeTcIndexLabel(buffer.Slice(offset + 2, TcIndexLabelWords));
+            Console.WriteLine($"  {entryLabel}: block={NovaCpu.FormatWord(block)} addr={NovaCpu.FormatWord(addr)} label={label}");
+        }
+    }
+
+    private void HandleTcIndexSet(int unit, string[] args)
+    {
+        if (args.Length < 4 ||
+            !TryParseNumber(args[0], out var slotWord) ||
+            !TryParseNumber(args[1], out var block) ||
+            !TryParseNumber(args[2], out var addr))
+        {
+            Console.WriteLine($"Usage: tc{unit} index set <slot> <block> <addr> <label>");
+            return;
+        }
+
+        var slot = slotWord;
+        if (slot >= TcIndexEntries)
+        {
+            Console.WriteLine($"TC{unit}: slot out of range (0-{TcIndexEntries - 1}).");
+            return;
+        }
+
+        var label = string.Join(' ', args.Skip(3));
+        if (!TryEncodeTcIndexLabel(label, out var labelWords, out var labelError))
+        {
+            Console.WriteLine($"TC{unit}: {labelError}");
+            return;
+        }
+
+        Span<ushort> buffer = stackalloc ushort[Tc08.WordsPerBlock];
+        if (!_tc08!.TryReadBlock(unit, 0, buffer, out var error))
+        {
+            if (error == "Block beyond end of tape.")
+            {
+                buffer.Clear();
+            }
+            else
+            {
+                Console.WriteLine($"TC{unit}: index read failed - {error}");
+                return;
+            }
+        }
+
+        var offset = slot * TcIndexWordsPerEntry;
+        buffer[offset] = block;
+        buffer[offset + 1] = addr;
+        for (var i = 0; i < TcIndexLabelWords; i++)
+        {
+            buffer[offset + 2 + i] = labelWords[i];
+        }
+        for (var i = offset + 2 + TcIndexLabelWords; i < offset + TcIndexWordsPerEntry; i++)
+        {
+            buffer[i] = 0;
+        }
+
+        if (!_tc08.TryWriteBlock(unit, 0, buffer, out error))
+        {
+            Console.WriteLine($"TC{unit}: index write failed - {error}");
+            return;
+        }
+
+        Console.WriteLine($"TC{unit}: index entry {Convert.ToString(slot, 8).PadLeft(2, '0')} updated.");
+    }
+
+    private void HandleTcIndexClear(int unit, string[] args)
+    {
+        if (args.Length < 1 || !TryParseNumber(args[0], out var slotWord))
+        {
+            Console.WriteLine($"Usage: tc{unit} index clear <slot>");
+            return;
+        }
+
+        var slot = slotWord;
+        if (slot >= TcIndexEntries)
+        {
+            Console.WriteLine($"TC{unit}: slot out of range (0-{TcIndexEntries - 1}).");
+            return;
+        }
+
+        Span<ushort> buffer = stackalloc ushort[Tc08.WordsPerBlock];
+        if (!_tc08!.TryReadBlock(unit, 0, buffer, out var error))
+        {
+            if (error == "Block beyond end of tape.")
+            {
+                buffer.Clear();
+            }
+            else
+            {
+                Console.WriteLine($"TC{unit}: index read failed - {error}");
+                return;
+            }
+        }
+
+        var offset = slot * TcIndexWordsPerEntry;
+        for (var i = 0; i < TcIndexWordsPerEntry; i++)
+        {
+            buffer[offset + i] = 0;
+        }
+
+        if (!_tc08.TryWriteBlock(unit, 0, buffer, out error))
+        {
+            Console.WriteLine($"TC{unit}: index write failed - {error}");
+            return;
+        }
+
+        Console.WriteLine($"TC{unit}: index entry {Convert.ToString(slot, 8).PadLeft(2, '0')} cleared.");
     }
 
     private void ListBreakpoints()
@@ -870,10 +1116,27 @@ LIMIT:  DW 0
         if (args.Length == 0)
         {
             Console.WriteLine("Usage: asm <filename> [start]");
+            Console.WriteLine("       asm -l <filename>");
             return;
         }
 
-        var path = args[0];
+        var listOnly = false;
+        string path;
+        if (args[0].Equals("-l", StringComparison.OrdinalIgnoreCase))
+        {
+            if (args.Length < 2)
+            {
+                Console.WriteLine("Usage: asm -l <filename>");
+                return;
+            }
+
+            listOnly = true;
+            path = args[1];
+        }
+        else
+        {
+            path = args[0];
+        }
         if (!File.Exists(path))
         {
             Console.WriteLine($"File not found: {path}");
@@ -913,6 +1176,18 @@ LIMIT:  DW 0
             {
                 Console.WriteLine($"  line {diag.LineNumber} (warning): {diag.Message}");
             }
+        }
+
+        if (listOnly)
+        {
+            foreach (var word in result.Words.OrderBy(w => w.Address))
+            {
+                var addressText = Convert.ToString(word.Address, 8).PadLeft(5, '0');
+                var text = NovaDisassembler.DisassembleInstructionListing(word.Address, word.Value);
+                Console.WriteLine($"{addressText}: {text}");
+            }
+
+            return;
         }
 
         foreach (var word in result.Words)
@@ -1119,6 +1394,53 @@ LIMIT:  DW 0
         }
     }
 
+    private static string DecodeTcIndexLabel(ReadOnlySpan<ushort> words)
+    {
+        Span<char> chars = stackalloc char[TcIndexLabelChars];
+        var idx = 0;
+        for (var i = 0; i < TcIndexLabelWords; i++)
+        {
+            var word = words[i];
+            chars[idx++] = (char)((word >> 8) & 0xFF);
+            chars[idx++] = (char)(word & 0xFF);
+        }
+
+        var label = new string(chars);
+        return label.TrimEnd('\0', ' ');
+    }
+
+    private static bool TryEncodeTcIndexLabel(string label, out ushort[] words, out string? error)
+    {
+        words = new ushort[TcIndexLabelWords];
+        if (label.Length > TcIndexLabelChars)
+        {
+            error = $"Label too long (max {TcIndexLabelChars} characters).";
+            return false;
+        }
+
+        Span<byte> bytes = stackalloc byte[TcIndexLabelChars];
+        bytes.Clear();
+        for (var i = 0; i < label.Length; i++)
+        {
+            var ch = label[i];
+            if (ch > 0xFF)
+            {
+                error = "Label must use 8-bit characters.";
+                return false;
+            }
+
+            bytes[i] = (byte)ch;
+        }
+
+        for (var i = 0; i < TcIndexLabelWords; i++)
+        {
+            words[i] = (ushort)((bytes[i * 2] << 8) | bytes[i * 2 + 1]);
+        }
+
+        error = null;
+        return true;
+    }
+
     private Dictionary<string, string> BuildHelp()
     {
         return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -1135,13 +1457,14 @@ LIMIT:  DW 0
             ["devices"] = "devices              List attached I/O devices",
             ["rtc"] = "rtc status            Show RTC status",
             ["tc"] = "tc status            Show TC08 drive status",
-            ["tc0"] = "tc0 <cmd> ...        TC08 unit 0 (attach/read/write/verify)",
-            ["tc1"] = "tc1 <cmd> ...        TC08 unit 1 (attach/read/write/verify)",
+            ["tc0"] = "tc0 <cmd> ...        TC08 unit 0 (attach/read/write/verify/index)",
+            ["tc1"] = "tc1 <cmd> ...        TC08 unit 1 (attach/read/write/verify/index)",
             ["break"] = "break <addr>         Toggle breakpoint",
             ["breaks"] = "breaks              List breakpoints",
             ["dis"] = "dis <addr> [n]       Disassemble n words from addr",
             ["sample"] = "sample               Load a small counting demo at 0200",
             ["asm"] = "asm <file> [addr]    Assemble file and load into memory",
+            ["asm -l"] = "asm -l <file>        Print assembler listing",
             ["tty"] = "tty read <file>      Queue input bytes for console TTI",
             ["ptr"] = "ptr read <file>      Queue input bytes for paper tape reader",
             ["ptp"] = "ptp attach <file>    Set output file for paper tape punch",

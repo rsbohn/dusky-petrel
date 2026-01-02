@@ -602,7 +602,7 @@ public sealed class NovaAssembler
             return true;
         }
 
-        var basePc = (pc + 1) & NovaCpu.AddressMask;
+        var basePc = pc & NovaCpu.AddressMask;
         var delta = dispValue - basePc;
         if (delta < -SimhDispSign || delta > SimhDispSign - 1)
         {

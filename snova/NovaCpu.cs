@@ -231,7 +231,7 @@ public class NovaCpu
         var mode = (instruction >> 8) & 0x3;
         var displacement = instruction & 0xFF;
 
-        var ea = EffectiveAddress(indirect, mode, displacement);
+        var ea = EffectiveAddress(indirect, mode, displacement, instructionAddress);
         var description = string.Empty;
         var tookBranch = false;
         var accumulator = 0;
@@ -361,7 +361,7 @@ public class NovaCpu
             Link = carryOut;
         }
 
-        result = ApplyShift(result, shift, out var shiftCarry);
+        result = ApplyShift(result, shift, Link, out var shiftCarry);
         if (shiftCarry.HasValue)
         {
             Link = shiftCarry.Value;
@@ -385,13 +385,13 @@ public class NovaCpu
         };
     }
 
-    private ushort EffectiveAddress(bool indirect, int mode, int displacement)
+    private ushort EffectiveAddress(bool indirect, int mode, int displacement, ushort instructionAddress)
     {
         var offset = mode == 0 ? displacement : SignExtend8(displacement);
         var baseAddress = mode switch
         {
             0 => 0,
-            1 => ProgramCounter,
+            1 => instructionAddress,
             2 => Accumulators[2],
             _ => Accumulators[3]
         };
@@ -433,17 +433,17 @@ public class NovaCpu
         return carryIn;
     }
 
-    private static ushort ApplyShift(ushort value, int shift, out bool? carryOut)
+    private static ushort ApplyShift(ushort value, int shift, bool linkIn, out bool? carryOut)
     {
         carryOut = null;
         switch (shift)
         {
             case 1: // left
                 carryOut = (value & 0x8000) != 0;
-                return (ushort)((value << 1) & WordMask);
+                return (ushort)(((value << 1) & WordMask) | (linkIn ? 1 : 0));
             case 2: // right
                 carryOut = (value & 0x1) != 0;
-                return (ushort)(value >> 1);
+                return (ushort)((value >> 1) | (linkIn ? 0x8000 : 0));
             case 3: // swap
                 return (ushort)(((value & 0xFF) << 8) | ((value >> 8) & 0xFF));
             default:

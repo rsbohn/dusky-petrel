@@ -35,4 +35,27 @@ Console.CancelKeyPress += (_, e) =>
 };
 
 var monitor = new NovaMonitor(cpu, tty, watchdog, tc08, rtc, paperTape, linePrinter);
+NovaUnixConsole? unixConsole = null;
+var unixConsolePath = Environment.GetEnvironmentVariable("SNOVA_UNIX_CONSOLE");
+if (!string.IsNullOrWhiteSpace(unixConsolePath))
+{
+    if (OperatingSystem.IsWindows())
+    {
+        Console.WriteLine("Unix console disabled on Windows.");
+    }
+    else
+    {
+        try
+        {
+            unixConsole = new NovaUnixConsole(unixConsolePath, monitor);
+            Console.WriteLine($"Unix console listening on {unixConsole.Path}.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Unix console disabled: {ex.Message}");
+        }
+    }
+}
+
 monitor.Run();
+unixConsole?.Dispose();

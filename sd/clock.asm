@@ -72,26 +72,26 @@ DONE:
         LDA     AC0, CHAR_EQ-DATA_BASE,AC2    ; '='
         DOA     AC0, TTO
         LDA     AC0, MINUTES_RAW-DATA_BASE,AC2
-        MOVR    AC0, AC0
-        MOVR    AC0, AC0
-        MOVR    AC0, AC0
-        MOVR    AC0, AC0
-        MOVR    AC0, AC0
-        MOVR    AC0, AC0
-        MOVR    AC0, AC0
-        MOVR    AC0, AC0
-        MOVR    AC0, AC0
-        MOVR    AC0, AC0
-        MOVR    AC0, AC0
-        MOVR    AC0, AC0
+        MOVZR   AC0, AC0
+        MOVZR   AC0, AC0
+        MOVZR   AC0, AC0
+        MOVZR   AC0, AC0
+        MOVZR   AC0, AC0
+        MOVZR   AC0, AC0
+        MOVZR   AC0, AC0
+        MOVZR   AC0, AC0
+        MOVZR   AC0, AC0
+        MOVZR   AC0, AC0
+        MOVZR   AC0, AC0
+        MOVZR   AC0, AC0
         JSR     PRINT2
         LDA     AC0, MINUTES_RAW-DATA_BASE,AC2
-        MOVR    AC0, AC0
-        MOVR    AC0, AC0
-        MOVR    AC0, AC0
-        MOVR    AC0, AC0
-        MOVR    AC0, AC0
-        MOVR    AC0, AC0
+        MOVZR   AC0, AC0
+        MOVZR   AC0, AC0
+        MOVZR   AC0, AC0
+        MOVZR   AC0, AC0
+        MOVZR   AC0, AC0
+        MOVZR   AC0, AC0
         LDA     AC1, SIXTY_FOUR-DATA_BASE,AC2
         AND     AC1, AC0
         JSR     PRINT2
@@ -110,9 +110,9 @@ PRINT2:
         STA     AC3, RETADR-DATA_BASE,AC2
         STA     AC0, TMPVAL-DATA_BASE,AC2
         LDA     AC1, TMPVAL-DATA_BASE,AC2
-        MOVR    AC1, AC1
-        MOVR    AC1, AC1
-        MOVR    AC1, AC1
+        MOVZR   AC1, AC1
+        MOVZR   AC1, AC1
+        MOVZR   AC1, AC1
         STA     AC1, TMP1-DATA_BASE,AC2
         LDA     AC0, TMP1-DATA_BASE,AC2
         LDA     AC1, ASCII0-DATA_BASE,AC2
