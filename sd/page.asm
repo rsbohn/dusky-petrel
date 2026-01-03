@@ -4,7 +4,7 @@
 ; -- eight 16-bit words per line
 ; 2000: word word word word word word word word
 
-        ORG 0o2000
+        ORG 07200
 START:  LDA AC0, LPERP
         STA AC0, LCOUNT
  ML:    LDA AC0, @ADDR
