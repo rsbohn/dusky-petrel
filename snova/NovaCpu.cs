@@ -16,8 +16,13 @@ public class NovaCpu
     private const ushort SlowMemoryBase = 0x7FF0; // 0o77760
     private const int SlowMemoryCount = 8;
     private const int SlowMemoryDelayMs = 100;
+    private const ushort InterruptReturnAddressSlot = 0x0000;
+    private const ushort InterruptVectorPointer = 0x0001;
 
     private readonly ushort[] _memory = new ushort[1 << 15]; // 32K words.
+    private readonly object _interruptSync = new();
+    private readonly bool[] _interruptPending = new bool[64];
+    private int _interruptEnableDelay;
 
     public ushort[] Accumulators { get; } = new ushort[4];
     public ushort ProgramCounter { get; private set; }
@@ -27,6 +32,7 @@ public class NovaCpu
     public NovaIoBus IoBus { get; } = new();
 
     public ReadOnlyCollection<ushort> Memory => Array.AsReadOnly(_memory);
+    public bool InterruptsEnabled { get; private set; }
 
     public void Reset(ushort startAddress = 0)
     {
@@ -36,6 +42,9 @@ public class NovaCpu
         Link = false;
         Halted = false;
         HaltReason = null;
+        InterruptsEnabled = false;
+        _interruptEnableDelay = 0;
+        ClearPendingInterrupts();
     }
 
     public void Halt(string? reason = null)
@@ -80,19 +89,29 @@ public class NovaCpu
             return new ExecutionStep(ProgramCounter, 0, $"CPU halted{reason}", true, false);
         }
 
+        if (TryServiceInterrupt(out var interruptStep))
+        {
+            return interruptStep;
+        }
+
         var instructionAddress = ProgramCounter;
         var instruction = Fetch();
+        ExecutionStep step;
         if (IsIoInstruction(instruction))
         {
-            return ExecuteIo(instruction, instructionAddress);
+            step = ExecuteIo(instruction, instructionAddress);
         }
-
-        if ((instruction & 0x8000) != 0)
+        else if ((instruction & 0x8000) != 0)
         {
-            return ExecuteOperate(instruction, instructionAddress);
+            step = ExecuteOperate(instruction, instructionAddress);
+        }
+        else
+        {
+            step = ExecuteMrf(instruction, instructionAddress);
         }
 
-        return ExecuteMrf(instruction, instructionAddress);
+        AdvanceInterruptEnableDelay();
+        return step;
     }
 
     private ushort Fetch()
@@ -118,7 +137,24 @@ public class NovaCpu
             accumulatorValue = Accumulators[io.Ac];
         }
 
-        if (io.DeviceCode == 63 && io.Kind == NovaIoOpKind.DOC && !io.Start && !io.Clear && !io.Pulse) // 0o77
+        if (io.DeviceCode == 63 && io.Kind == NovaIoOpKind.NIO && io.Start) // 0o77 INTEN
+        {
+            InterruptsEnabled = false;
+            _interruptEnableDelay = 2;
+            handled = true;
+        }
+        else if (io.DeviceCode == 63 && io.Kind == NovaIoOpKind.NIO && io.Clear) // 0o77 INTDS
+        {
+            InterruptsEnabled = false;
+            _interruptEnableDelay = 0;
+            handled = true;
+        }
+        else if (io.DeviceCode == 63 && io.Kind == NovaIoOpKind.DIB) // 0o77 INTA
+        {
+            accumulatorValue = (ushort)(TryPeekInterrupt(out var deviceCode) ? deviceCode : 0);
+            handled = true;
+        }
+        else if (io.DeviceCode == 63 && io.Kind == NovaIoOpKind.DOC && !io.Start && !io.Clear && !io.Pulse) // 0o77 HALT
         {
             Halt("HALT instruction");
             handled = true;
@@ -126,6 +162,10 @@ public class NovaCpu
         else
         {
             handled = IoBus.TryExecute(io, ref accumulatorValue, out skip);
+        }
+        if (io.Kind == NovaIoOpKind.NIO && io.Clear && io.DeviceCode != 63)
+        {
+            ClearInterrupt(io.DeviceCode);
         }
         if (handled && usesAccumulator)
         {
@@ -493,6 +533,118 @@ public class NovaCpu
         }
 
         return (short)masked;
+    }
+
+    public void RequestInterrupt(int deviceCode)
+    {
+        var code = deviceCode & 0x3F;
+        lock (_interruptSync)
+        {
+            _interruptPending[code] = true;
+        }
+    }
+
+    public void ClearInterrupt(int deviceCode)
+    {
+        var code = deviceCode & 0x3F;
+        lock (_interruptSync)
+        {
+            _interruptPending[code] = false;
+        }
+    }
+
+    private bool TryServiceInterrupt(out ExecutionStep step)
+    {
+        step = default;
+        if (!InterruptsEnabled)
+        {
+            return false;
+        }
+
+        if (!HasPendingInterrupt())
+        {
+            return false;
+        }
+
+        InterruptsEnabled = false;
+        var returnAddress = ProgramCounter;
+        WriteMemory(InterruptReturnAddressSlot, returnAddress);
+        ProgramCounter = (ushort)(ReadMemory(InterruptVectorPointer) & AddressMask);
+        step = new ExecutionStep(returnAddress, 0, "INT", Halted, true)
+        {
+            AccumulatorIndex = 0,
+            Link = Link
+        };
+        return true;
+    }
+
+    private bool HasPendingInterrupt()
+    {
+        lock (_interruptSync)
+        {
+            for (var i = 0; i < _interruptPending.Length; i++)
+            {
+                if (_interruptPending[i])
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private bool TryPeekInterrupt(out int deviceCode)
+    {
+        lock (_interruptSync)
+        {
+            var deviceOrder = IoBus.GetDeviceOrder();
+            for (var i = 0; i < deviceOrder.Count; i++)
+            {
+                var code = deviceOrder[i] & 0x3F;
+                if (_interruptPending[code])
+                {
+                    deviceCode = code;
+                    return true;
+                }
+            }
+
+            for (var i = 0; i < _interruptPending.Length; i++)
+            {
+                if (!_interruptPending[i])
+                {
+                    continue;
+                }
+
+                deviceCode = i;
+                return true;
+            }
+        }
+
+        deviceCode = -1;
+        return false;
+    }
+
+    private void ClearPendingInterrupts()
+    {
+        lock (_interruptSync)
+        {
+            Array.Clear(_interruptPending, 0, _interruptPending.Length);
+        }
+    }
+
+    private void AdvanceInterruptEnableDelay()
+    {
+        if (_interruptEnableDelay <= 0)
+        {
+            return;
+        }
+
+        _interruptEnableDelay--;
+        if (_interruptEnableDelay == 0)
+        {
+            InterruptsEnabled = true;
+        }
     }
 
     private static string FormatAddress(ushort value) => Convert.ToString(value, 8).PadLeft(4, '0');

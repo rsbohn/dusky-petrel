@@ -387,6 +387,9 @@ public sealed class NovaWatchdogDevice : INovaIoDevice
     {
         switch (action)
         {
+            case NovaWatchdogAction.Interrupt:
+                _cpu.RequestInterrupt(DeviceCode);
+                break;
             case NovaWatchdogAction.Halt:
                 _cpu.Halt("Watchdog");
                 break;

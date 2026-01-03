@@ -53,6 +53,7 @@ Blocks are 129 words (128 data + 1 spare). Drives are `TC0` and `TC1`.
 - Watchdog: `WDT` = `0o70` (56).
 - Slow memory: reads from `0o77760` to `0o77767` pause for 100 ms.
 - RTC device: `0o21` (17). `DIA` = minutes since midnight (UTC), `DIB`/`DIC` = epoch seconds (low/high, epoch 2000-01-01).
+- Interrupts: `INTEN` enables interrupts after a one-instruction delay (so `INTEN` + `JMP @0` returns safely), `INTDS` disables, and `INTA` reports the device code.
 
 ## Paper Tape & Line Printer
 

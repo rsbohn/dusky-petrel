@@ -45,10 +45,16 @@ public interface INovaIoDevice
 public sealed class NovaIoBus
 {
     private readonly Dictionary<int, INovaIoDevice> _devices = new();
+    private readonly List<int> _deviceOrder = new();
 
     public void RegisterDevice(INovaIoDevice device)
     {
-        _devices[device.DeviceCode & 0x3F] = device;
+        var code = device.DeviceCode & 0x3F;
+        _devices[code] = device;
+        if (!_deviceOrder.Contains(code))
+        {
+            _deviceOrder.Add(code);
+        }
     }
 
     public List<(int DeviceCode, INovaIoDevice Device)> GetDevices()
@@ -62,6 +68,8 @@ public sealed class NovaIoBus
         devices.Sort((left, right) => left.DeviceCode.CompareTo(right.DeviceCode));
         return devices;
     }
+
+    public IReadOnlyList<int> GetDeviceOrder() => _deviceOrder;
 
     public bool TryExecute(NovaIoOp op, ref ushort accumulator, out bool skip)
     {
