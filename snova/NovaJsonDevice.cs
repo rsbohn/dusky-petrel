@@ -267,7 +267,7 @@ public sealed class NovaJsonDevice : INovaIoDevice
                 if (!element.TryGetProperty(segment, out element))
                 {
                     element = default;
-                    return false;
+                    return true;
                 }
                 continue;
             }
@@ -283,7 +283,7 @@ public sealed class NovaJsonDevice : INovaIoDevice
                 if (index < 0 || index >= element.GetArrayLength())
                 {
                     element = default;
-                    return false;
+                    return true;
                 }
 
                 element = element[index];
