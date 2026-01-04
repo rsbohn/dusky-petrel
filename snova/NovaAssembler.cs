@@ -32,7 +32,10 @@ public sealed class NovaAssembler
             ["LPT"] = 15, // 0o17
             ["DSK"] = 16, // 0o20
             ["MTA"] = 18, // 0o22
+            ["WEB"] = 18, // 0o22
+            ["UTTO"] = 19, // 0o23
             ["DCM"] = 20, // 0o24
+            ["JSP"] = 21, // 0o25
             ["QTY"] = 24, // 0o30
             ["ADCV"] = 24, // 0o30
             ["DKP"] = 27, // 0o33
@@ -694,10 +697,38 @@ public sealed class NovaAssembler
 
     private static string StripComment(string line)
     {
-        var semi = line.IndexOf(';');
-        var slash = line.IndexOf("//", StringComparison.Ordinal);
-        var cut = semi >= 0 && slash >= 0 ? Math.Min(semi, slash) : Math.Max(semi, slash);
-        return cut >= 0 ? line[..cut] : line;
+        var inQuote = false;
+        var inSlashString = false;
+        for (var i = 0; i < line.Length; i++)
+        {
+            var ch = line[i];
+            if (ch == '"' && !inSlashString)
+            {
+                inQuote = !inQuote;
+                continue;
+            }
+
+            if (!inQuote && ch == '/')
+            {
+                inSlashString = !inSlashString;
+                continue;
+            }
+
+            if (!inQuote && !inSlashString)
+            {
+                if (ch == ';')
+                {
+                    return line[..i];
+                }
+
+                if (ch == '/' && i + 1 < line.Length && line[i + 1] == '/')
+                {
+                    return line[..i];
+                }
+            }
+        }
+
+        return line;
     }
 
     private static LabelSplit SplitLabel(string line)
@@ -798,14 +829,33 @@ public sealed class NovaAssembler
         var rest = trimmed[tokenEnd..].Trim();
         if (string.IsNullOrEmpty(rest))
         {
-            error = "TXT requires /string/.";
+            error = "TXT requires /string/ or \"string\".";
+            return true;
+        }
+
+        if (rest[0] == '"')
+        {
+            var lastQuote = rest.LastIndexOf('\"');
+            if (lastQuote == 0)
+            {
+                error = "TXT requires a closing '\"'.";
+                return true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(rest[(lastQuote + 1)..]))
+            {
+                error = "TXT supports only a single /string/ or \"string\".";
+                return true;
+            }
+
+            text = rest.Substring(1, lastQuote - 1);
             return true;
         }
 
         var firstSlash = rest.IndexOf('/');
         if (firstSlash < 0)
         {
-            error = "TXT requires /string/.";
+            error = "TXT requires /string/ or \"string\".";
             return true;
         }
 
@@ -818,13 +868,13 @@ public sealed class NovaAssembler
 
         if (!string.IsNullOrWhiteSpace(rest[..firstSlash]))
         {
-            error = "TXT expects /string/.";
+            error = "TXT expects /string/ or \"string\".";
             return true;
         }
 
         if (!string.IsNullOrWhiteSpace(rest[(lastSlash + 1)..]))
         {
-            error = "TXT supports only a single /string/.";
+            error = "TXT supports only a single /string/ or \"string\".";
             return true;
         }
 
