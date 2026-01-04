@@ -8,6 +8,7 @@ and diagnostics.
 
 - TTI: console input, device code `0o10`
 - TTO: console output, device code `0o11`
+- UTTO: unicode console output, device code `0o23`
 
 Both devices expose Register A (8-bit buffer), BUSY and DONE flags, and an
 optional interrupt enable/disable state. Registers B and C are unused.
@@ -44,6 +45,12 @@ AC=11  SKPDZ  skip if DONE = 0
 - DOA writes AC -> A and initiates character output.
 - BUSY indicates output in progress.
 - Simple implementations may complete immediately.
+
+## UTTO (unicode output, 0o23)
+
+- DOA/DOB/DOC write a UTF-16 code unit from AC to output.
+- The device ignores a leading BOM (0xFEFF) on the first output word.
+- Surrogate pairs are combined; malformed sequences emit U+FFFD.
 
 ## Echo program
 

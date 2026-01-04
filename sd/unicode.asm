@@ -1,0 +1,29 @@
+        ORG 0o200
+
+INIT:   LDA AC1, MSGPTR
+        STA AC1, MPTR
+
+LOOP:   LDA AC0, @MPTR
+        MOV AC0, AC0, SNR
+        JMP DONE
+        DOA AC0, UTTO
+
+WAIT:   SKPDN UTTO
+        JMP WAIT
+
+        LDA AC1, MPTR
+        LDA AC2, ONE
+        ADDZ AC2, AC1
+        STA AC1, MPTR
+        JMP LOOP
+
+DONE:   HALT
+
+MPTR:   DW 0
+MSGPTR: DW MSG
+ONE:    DW 1
+
+MSG:    DW 0o110, 0o145, 0o154, 0o154, 0o157, 0o054, 0o040
+        DW 0o165, 0o156, 0o151, 0o143, 0o157, 0o144, 0o145, 0o072, 0o040
+        DW 0o23072, 0o054, 0o040, 0o145, 0o155, 0o157, 0o152, 0o151, 0o072, 0o040
+        DW 0o154075, 0o157000, 0o015, 0o012, 0

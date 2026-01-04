@@ -464,12 +464,7 @@ public class NovaMonitor
 
             var step = _cpu.Step();
             executed++;
-        if (step.Halted)
-        {
-            RenderStep(step);
-            break;
-        }
-    }
+	    }
 
         var utcNow = DateTime.UtcNow;
         Console.WriteLine($"UTC {utcNow:HH:mm:ss}");
@@ -1490,6 +1485,9 @@ LIMIT:  DW 0
             12 => "LPT (line printer)",
             _ => device switch
             {
+                NovaUnicodeTtoDevice => "UTTO (unicode output)",
+                NovaWebDevice => "WEB (http/https)",
+                NovaJsonDevice => "JSP (json parser)",
                 NovaWatchdogDevice => "WDT watchdog",
                 NovaTc08Device => "TC08 tape",
                 NovaRtcDevice => "RTC clock",
