@@ -20,9 +20,12 @@ public class NovaMonitor
     private readonly NovaRtcDevice? _rtc;
     private readonly NovaPaperTape? _paperTape;
     private readonly NovaLinePrinterDevice? _linePrinter;
+    private readonly NovaWebDevice? _web;
+    private readonly NovaJsonDevice? _json;
     private readonly HashSet<ushort> _breakpoints = new();
     private readonly Dictionary<string, string> _helpText;
     private readonly object _commandLock = new();
+    private string? _webUrl;
 
     public NovaMonitor(
         NovaCpu cpu,
@@ -31,7 +34,9 @@ public class NovaMonitor
         Tc08? tc08 = null,
         NovaRtcDevice? rtc = null,
         NovaPaperTape? paperTape = null,
-        NovaLinePrinterDevice? linePrinter = null)
+        NovaLinePrinterDevice? linePrinter = null,
+        NovaWebDevice? web = null,
+        NovaJsonDevice? json = null)
     {
         _cpu = cpu;
         _tty = tty;
@@ -40,6 +45,8 @@ public class NovaMonitor
         _rtc = rtc;
         _paperTape = paperTape;
         _linePrinter = linePrinter;
+        _web = web;
+        _json = json;
         _cpu.Reset();
         _watchdog?.ResetDeviceState();
         _helpText = BuildHelp();
@@ -214,6 +221,12 @@ public class NovaMonitor
                 break;
             case "lpt":
                 HandleLpt(args);
+                break;
+            case "web":
+                HandleWeb(args);
+                break;
+            case "jsp":
+                HandleJsp(args);
                 break;
             case "wdt":
                 HandleWatchdog(args);
@@ -1106,6 +1119,242 @@ LIMIT:  DW 0
         }
     }
 
+    private void HandleWeb(string[] args)
+    {
+        if (_web is null)
+        {
+            Console.WriteLine("WEB device not configured.");
+            return;
+        }
+
+        if (args.Length < 1)
+        {
+            Console.WriteLine("Usage: web <open|print|status> ...");
+            return;
+        }
+
+        var subcommand = args[0].ToLowerInvariant();
+        switch (subcommand)
+        {
+            case "open":
+                if (args.Length < 2)
+                {
+                    Console.WriteLine("Usage: web open <url|.>");
+                    return;
+                }
+
+                string? url;
+                if (args[1] == ".")
+                {
+                    if (string.IsNullOrWhiteSpace(_webUrl))
+                    {
+                        Console.WriteLine("No current URL. Use 'web open <url>' first.");
+                        return;
+                    }
+                    url = _webUrl;
+                }
+                else
+                {
+                    url = string.Join(' ', args.Skip(1));
+                    _webUrl = url;
+                }
+
+                if (!_web.OpenUrl(url, out var error))
+                {
+                    Console.WriteLine($"WEB open failed: {error}");
+                    return;
+                }
+
+                if (_web.TryGetLastMetadata(out var meta))
+                {
+                    Console.WriteLine($"WEB open OK. status={meta.StatusCode} length={meta.PayloadLength}");
+                }
+                else
+                {
+                    Console.WriteLine("WEB open OK.");
+                }
+                break;
+            case "print":
+                if (args.Length < 2)
+                {
+                    Console.WriteLine("Usage: web print <headers|body>");
+                    return;
+                }
+
+                if (!_web.TryGetLastMetadata(out var metadata))
+                {
+                    Console.WriteLine("No WEB response yet.");
+                    return;
+                }
+
+                var target = args[1].ToLowerInvariant();
+                switch (target)
+                {
+                    case "headers":
+                        PrintWebHeaders(metadata);
+                        break;
+                    case "body":
+                        PrintWebBody(metadata);
+                        break;
+                    default:
+                        Console.WriteLine($"Unknown web print target '{target}'.");
+                        break;
+                }
+                break;
+            case "status":
+                if (!_web.TryGetLastMetadata(out var status))
+                {
+                    Console.WriteLine("No WEB response yet.");
+                    return;
+                }
+
+                PrintWebStatus(status);
+                break;
+            default:
+                Console.WriteLine($"Unknown web command '{subcommand}'.");
+                break;
+        }
+    }
+
+    private void HandleJsp(string[] args)
+    {
+        if (_json is null)
+        {
+            Console.WriteLine("JSP device not configured.");
+            return;
+        }
+
+        if (args.Length != 1 || !args[0].Equals("status", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine("Usage: jsp status");
+            return;
+        }
+
+        if (!_json.TryGetLastMetadata(out var meta))
+        {
+            Console.WriteLine("No JSP activity yet.");
+            return;
+        }
+
+        Console.WriteLine($"type={DescribeJsonType(meta.TypeCode)} error={DescribeJsonError(meta.ErrorCode)} length={meta.ValueLength}");
+        Console.WriteLine($"flags: busy={meta.Busy} done={meta.Done} error={meta.Error} value_ready={meta.ValueReady} eof={meta.Eof}");
+    }
+
+    private void PrintWebHeaders(NovaWebDevice.WebMetadata metadata)
+    {
+        Console.WriteLine($"status={metadata.StatusCode}");
+        Console.WriteLine($"length={metadata.PayloadLength}");
+        Console.WriteLine($"content_type={DescribeWebContentType(metadata.ContentTypeCode)} ({metadata.ContentTypeCode})");
+        Console.WriteLine($"error={DescribeWebError(metadata.ErrorCode)} ({metadata.ErrorCode})");
+        if (!string.IsNullOrWhiteSpace(metadata.Charset))
+        {
+            Console.WriteLine($"charset={metadata.Charset}");
+        }
+    }
+
+    private void PrintWebBody(NovaWebDevice.WebMetadata metadata)
+    {
+        if (!_web!.TryGetLastResponse(out var bytes, out var charset) || bytes.Length == 0)
+        {
+            Console.WriteLine("No response body.");
+            return;
+        }
+
+        var text = DecodeWebBody(bytes, charset);
+        Console.WriteLine(text);
+    }
+
+    private void PrintWebStatus(NovaWebDevice.WebMetadata metadata)
+    {
+        Console.WriteLine($"url={_webUrl ?? "(none)"}");
+        Console.WriteLine($"status={metadata.StatusCode} length={metadata.PayloadLength} type={DescribeWebContentType(metadata.ContentTypeCode)} error={DescribeWebError(metadata.ErrorCode)}");
+        Console.WriteLine($"flags: busy={metadata.Busy} done={metadata.Done} error={metadata.Error} block={metadata.BlockReady} eof={metadata.Eof} head={metadata.Head} has_response={metadata.HasResponse}");
+        if (!string.IsNullOrWhiteSpace(metadata.Charset))
+        {
+            Console.WriteLine($"charset={metadata.Charset}");
+        }
+    }
+
+    private static string DecodeWebBody(byte[] bytes, string? charset)
+    {
+        Encoding encoding;
+        if (!string.IsNullOrWhiteSpace(charset))
+        {
+            try
+            {
+                encoding = Encoding.GetEncoding(charset);
+            }
+            catch (ArgumentException)
+            {
+                encoding = Encoding.UTF8;
+            }
+        }
+        else
+        {
+            encoding = Encoding.UTF8;
+        }
+
+        return encoding.GetString(bytes);
+    }
+
+    private static string DescribeWebContentType(int code)
+    {
+        return code switch
+        {
+            1 => "text/plain",
+            2 => "text/html",
+            3 => "application/json",
+            4 => "application/octet-stream",
+            _ => "unknown"
+        };
+    }
+
+    private static string DescribeWebError(int code)
+    {
+        return code switch
+        {
+            0 => "OK",
+            1 => "BadUrl",
+            2 => "ResolveFail",
+            3 => "ConnectFail",
+            4 => "TlsFail",
+            5 => "Timeout",
+            6 => "ReadFail",
+            7 => "UnsupportedScheme",
+            8 => "TooLarge",
+            _ => "Unknown"
+        };
+    }
+
+    private static string DescribeJsonError(int code)
+    {
+        return code switch
+        {
+            0 => "OK",
+            1 => "NoSource",
+            2 => "BadJson",
+            3 => "BadPath",
+            4 => "TypeMismatch",
+            6 => "Internal",
+            _ => "Unknown"
+        };
+    }
+
+    private static string DescribeJsonType(int code)
+    {
+        return code switch
+        {
+            0 => "missing",
+            1 => "string",
+            2 => "number",
+            3 => "bool",
+            4 => "null",
+            5 => "object",
+            6 => "array",
+            _ => "unknown"
+        };
+    }
+
     private void AssembleFileCommand(string[] args)
     {
         if (args.Length == 0)
@@ -1464,6 +1713,8 @@ LIMIT:  DW 0
             ["ptr"] = "ptr read <file>      Queue input bytes for paper tape reader",
             ["ptp"] = "ptp attach <file>    Set output file for paper tape punch",
             ["lpt"] = "lpt status           Show line printer output path",
+            ["web"] = "web <cmd> ...        WEB helper (open/print/status)",
+            ["jsp"] = "jsp status           Show JSP status",
             ["wdt"] = "wdt <cmd> [args]     Configure watchdog timer",
             ["exit"] = "exit                 Quit the monitor"
         };

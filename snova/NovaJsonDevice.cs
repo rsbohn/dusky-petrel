@@ -37,6 +37,33 @@ public sealed class NovaJsonDevice : INovaIoDevice
 
     public int DeviceCode { get; }
 
+    public readonly record struct JsonMetadata(
+        int TypeCode,
+        int ErrorCode,
+        int ValueLength,
+        bool Busy,
+        bool Done,
+        bool Error,
+        bool ValueReady,
+        bool Eof);
+
+    public bool TryGetLastMetadata(out JsonMetadata metadata)
+    {
+        lock (_sync)
+        {
+            metadata = new JsonMetadata(
+                _typeCode,
+                _errorCode,
+                _valueWords.Length,
+                _busy,
+                _done,
+                _error,
+                _valueReady,
+                _eof);
+            return _done || _busy || _error || _valueReady || _eof;
+        }
+    }
+
     public bool ExecuteIo(NovaIoOp op, ref ushort accumulator, out bool skip)
     {
         skip = false;

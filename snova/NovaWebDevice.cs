@@ -50,6 +50,71 @@ public sealed class NovaWebDevice : INovaIoDevice
 
     public int DeviceCode { get; }
 
+    public readonly record struct WebMetadata(
+        int StatusCode,
+        int PayloadLength,
+        int ContentTypeCode,
+        int ErrorCode,
+        bool HasResponse,
+        bool Busy,
+        bool Done,
+        bool Error,
+        bool BlockReady,
+        bool Eof,
+        bool Head,
+        string? Charset);
+
+    public bool TryGetLastMetadata(out WebMetadata metadata)
+    {
+        lock (_sync)
+        {
+            metadata = new WebMetadata(
+                _statusCode,
+                _payloadLength,
+                _contentTypeCode,
+                _errorCode,
+                _hasResponse,
+                _busy,
+                _done,
+                _error,
+                _blockReady,
+                _eof,
+                _head,
+                _responseCharset);
+            return _done || _busy || _hasResponse || _error;
+        }
+    }
+
+    public bool OpenUrl(string url, out string? error)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            error = "URL is empty.";
+            return false;
+        }
+
+        lock (_sync)
+        {
+            _urlBytes.Clear();
+            var bytes = Encoding.UTF8.GetBytes(url);
+            for (var i = 0; i < bytes.Length; i++)
+            {
+                _urlBytes.Add(bytes[i]);
+            }
+
+            _control = 0;
+            Refresh();
+            if (_error)
+            {
+                error = $"WEB error {_errorCode}.";
+                return false;
+            }
+        }
+
+        error = null;
+        return true;
+    }
+
     public bool TryGetLastResponse(out byte[] bytes, out string? charset)
     {
         lock (_sync)
