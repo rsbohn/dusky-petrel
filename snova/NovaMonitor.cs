@@ -26,6 +26,7 @@ public class NovaMonitor
     private readonly Dictionary<string, string> _helpText;
     private readonly object _commandLock = new();
     private string? _webUrl;
+    private int _defaultStepLimit = int.MaxValue;
 
     public NovaMonitor(
         NovaCpu cpu,
@@ -181,6 +182,9 @@ public class NovaMonitor
                 break;
             case "go":
                 RunFromAddress(args);
+                break;
+            case "cpu":
+                HandleCpu(args);
                 break;
             case "tc":
                 HandleTc(args);
@@ -485,14 +489,61 @@ public class NovaMonitor
         Console.WriteLine($"Stopped after {executed} step(s). PC={NovaCpu.FormatWord(_cpu.ProgramCounter)} HALT={_cpu.Halted}{haltReason}");
     }
 
-    private static int ParseStepLimit(string[] args, int index)
+    private int ParseStepLimit(string[] args, int index)
     {
         if (args.Length > index && int.TryParse(args[index], out var parsed))
         {
             return parsed;
         }
 
-        return int.MaxValue;
+        return _defaultStepLimit;
+    }
+
+    private void HandleCpu(string[] args)
+    {
+        if (args.Length == 0)
+        {
+            Console.WriteLine("Usage: cpu limit [n]");
+            return;
+        }
+
+        if (!args[0].Equals("limit", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine($"Unknown cpu command '{args[0]}'.");
+            Console.WriteLine("Usage: cpu limit [n]");
+            return;
+        }
+
+        if (args.Length == 1)
+        {
+            Console.WriteLine($"cpu limit = {FormatStepLimit()}");
+            return;
+        }
+
+        if (!int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+        {
+            Console.WriteLine("Usage: cpu limit [n]");
+            return;
+        }
+
+        if (parsed < 0)
+        {
+            Console.WriteLine("cpu limit must be >= 0.");
+            return;
+        }
+
+        _defaultStepLimit = parsed == 0 ? int.MaxValue : parsed;
+        Console.WriteLine($"cpu limit set to {FormatStepLimit()}");
+    }
+
+    private string FormatStepLimit()
+    {
+        if (_defaultStepLimit == int.MaxValue)
+        {
+            return "0 (unlimited)";
+        }
+
+        return $"{_defaultStepLimit} (0o{Convert.ToString(_defaultStepLimit, 8)})";
     }
 
     private void ToggleBreakpoint(string[] args)
@@ -1698,6 +1749,7 @@ LIMIT:  DW 0
             ["trace"] = "trace [n]            Trace n instructions with registers",
             ["run"] = "run [n]              Run until HALT/breakpoint or n instructions",
             ["go"] = "go <addr> [n]        Set PC and run until HALT/breakpoint or n instructions",
+            ["cpu"] = "cpu limit [n]        Set default run limit (0 = unlimited)",
             ["devices"] = "devices              List attached I/O devices",
             ["rtc"] = "rtc status            Show RTC status",
             ["tc"] = "tc status            Show TC08 drive status",
