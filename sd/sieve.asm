@@ -222,57 +222,50 @@ PR_DN:  LDA AC2, CRLFP
         JSR PRTSTR
         JMP @PR_RET
 
-; Print number in AC0 (octal)
+; Print number in AC0 (decimal)
 PRTDEC: STA AC0, PD_NUM
         STA AC3, PD_RET
-        
-        ; Simple: just print octal for now with leading space
+
+        ; Print leading space, then 5 decimal digits (00000-09999)
         LDA AC0, SPACE
         JSR PUTCH
         LDA AC0, PD_NUM
-        JSR PRTOCT
-        
-        JMP @PD_RET
+        LDA AC1, TEN
+        JSR DIV
+        STA AC1, PD_D0
+        LDA AC1, TEN
+        JSR DIV
+        STA AC1, PD_D1
+        LDA AC1, TEN
+        JSR DIV
+        STA AC1, PD_D2
+        LDA AC1, TEN
+        JSR DIV
+        STA AC1, PD_D3
+        STA AC0, PD_D4
 
-; Print octal number in AC0 (5 digits)
-PRTOCT: STA AC0, PO_NUM
-        STA AC3, PO_RET
-        
-        ; Extract 5 octal digits
-        LDA AC0, PO_NUM
-        LDA AC1, DIV4096    ; 0o10000
-        JSR DIV
+        LDA AC0, PD_D4
         LDA AC2, ZERO
         ADDZ AC2, AC0
         JSR PUTCH
-        
-        MOV AC1, AC0        ; Remainder
-        LDA AC1, DIV512     ; 0o1000
-        JSR DIV
+        LDA AC0, PD_D3
         LDA AC2, ZERO
         ADDZ AC2, AC0
         JSR PUTCH
-        
-        MOV AC1, AC0
-        LDA AC1, DIV64      ; 0o100
-        JSR DIV
+        LDA AC0, PD_D2
         LDA AC2, ZERO
         ADDZ AC2, AC0
         JSR PUTCH
-        
-        MOV AC1, AC0
-        LDA AC1, DIV8       ; 0o10
-        JSR DIV
+        LDA AC0, PD_D1
         LDA AC2, ZERO
         ADDZ AC2, AC0
         JSR PUTCH
-        
-        MOV AC1, AC0
+        LDA AC0, PD_D0
         LDA AC2, ZERO
         ADDZ AC2, AC0
         JSR PUTCH
-        
-        JMP @PO_RET
+
+        JMP @PD_RET
 
 ; Divide AC0 by AC1, return quotient in AC0, remainder in AC1
 DIV:    STA AC3, D_RET
@@ -368,8 +361,11 @@ PR_NUM: DW 0
 PR_RET: DW 0
 PD_NUM: DW 0
 PD_RET: DW 0
-PO_NUM: DW 0
-PO_RET: DW 0
+PD_D0:  DW 0
+PD_D1:  DW 0
+PD_D2:  DW 0
+PD_D3:  DW 0
+PD_D4:  DW 0
 D_RET:  DW 0
 DDIV:   DW 0
 PS_RET: DW 0
@@ -391,6 +387,7 @@ MAPCOUNT: DW 0o471          ; 313
 BMPTR:   DW BITMAP
 SPACE:   DW 0o040           ; Space character
 ZERO:    DW 0o060           ; '0' character
+TEN:     DW 0o12            ; 10
 ZW:      DW 0
 ONE:     DW 1
 TWO:     DW 2
@@ -398,10 +395,6 @@ THREE:   DW 3
 SIXTEEN: DW 0o20            ; 16
 V100:    DW 0o144           ; 100
 V10000:  DW 0o23420         ; 10000
-DIV4096: DW 0o10000         ; 4096
-DIV512:  DW 0o1000          ; 512
-DIV64:   DW 0o100           ; 64
-DIV8:    DW 0o10            ; 8
 TCWRITE: DW 0o4             ; 4
 
 ; Bit mask table for positions 0-15
