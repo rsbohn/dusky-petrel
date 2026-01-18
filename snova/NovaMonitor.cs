@@ -24,9 +24,16 @@ public class NovaMonitor
     private readonly NovaJsonDevice? _json;
     private readonly HashSet<ushort> _breakpoints = new();
     private readonly Dictionary<string, string> _helpText;
+    private readonly Dictionary<string, Action<TokenStream>> _words;
     private readonly object _commandLock = new();
     private string? _webUrl;
+    private bool _quit;
+    private bool _allowExit = true;
+    private int _stackDepth;
     private int _defaultStepLimit = int.MaxValue;
+
+    private const ushort MonitorStackBase = 24; // 0o30
+    private const int MonitorStackSize = 8;
 
     public NovaMonitor(
         NovaCpu cpu,
@@ -51,13 +58,15 @@ public class NovaMonitor
         _cpu.Reset();
         _watchdog?.ResetDeviceState();
         _helpText = BuildHelp();
+        _words = BuildWordTable();
     }
 
     public void Run()
     {
         Console.WriteLine("snova - Data General Nova 1210 emulator");
-        Console.WriteLine("Type 'help' for command summary. Numbers default to octal; prefix with 0x for hex.");
-        while (true)
+        Console.WriteLine("Type 'help' for command summary. Numbers default to octal; use 0x/0o/0b, # decimal, $ hex.");
+        _quit = false;
+        while (!_quit)
         {
             Console.Write("snova> ");
             var line = Console.ReadLine();
@@ -80,12 +89,6 @@ public class NovaMonitor
 
     public string ExecuteCommandLine(string line, bool allowExit)
     {
-        var trimmed = line.Trim();
-        if (!allowExit && IsExitCommand(trimmed))
-        {
-            return "Exit is disabled on the unix console.\n";
-        }
-
         using var writer = new StringWriter();
         lock (_commandLock)
         {
@@ -95,7 +98,7 @@ public class NovaMonitor
             {
                 Console.SetOut(writer);
                 Console.SetError(writer);
-                _ = HandleCommand(trimmed);
+                _ = ExecuteLine(line, allowExit);
             }
             catch (Exception ex)
             {
@@ -121,130 +124,52 @@ public class NovaMonitor
     {
         lock (_commandLock)
         {
-            return HandleCommand(line);
+            return ExecuteLine(line, allowExit: true);
         }
     }
 
-    private static bool IsExitCommand(string line)
+    private bool ExecuteLine(string line, bool allowExit)
     {
-        if (string.IsNullOrWhiteSpace(line))
+        var tokens = Tokenize(line);
+        if (tokens.Count == 0)
         {
-            return false;
+            return true;
         }
 
-        var trimmed = line.Trim();
-        var spaceIndex = trimmed.IndexOf(' ');
-        var command = spaceIndex >= 0 ? trimmed[..spaceIndex] : trimmed;
-        command = command.ToLowerInvariant();
-        return command == "q" || command == "quit" || command == "exit";
-    }
-
-    private bool HandleCommand(string line)
-    {
-        var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var command = parts[0].ToLowerInvariant();
-        var args = parts.Skip(1).ToArray();
-        switch (command)
+        _allowExit = allowExit;
+        var stream = new TokenStream(tokens);
+        while (stream.HasMore)
         {
-            case "q":
-            case "quit":
-            case "exit":
-                return false;
-            case "help":
-                ShowHelp(args);
-                break;
-            case "reset":
-                Reset(args);
-                break;
-            case "regs":
-            case "r":
-                DumpRegisters();
-                break;
-            case "exam":
-            case "x":
-                Examine(args);
-                break;
-            case "deposit":
-            case "dep":
-            case "d":
-                Deposit(args);
-                break;
-            case "step":
-            case "s":
-                Step(args);
-                break;
-            case "trace":
-            case "t":
-                Trace(args);
-                break;
-            case "run":
-                RunUntilHalt(args);
-                break;
-            case "go":
-                RunFromAddress(args);
-                break;
-            case "cpu":
-                HandleCpu(args);
-                break;
-            case "tc":
-                HandleTc(args);
-                break;
-            case "tc0":
-                HandleTcUnit(0, args);
-                break;
-            case "tc1":
-                HandleTcUnit(1, args);
-                break;
-            case "rtc":
-                HandleRtc(args);
-                break;
-            case "devices":
-                ShowDevices();
-                break;
-            case "break":
-            case "b":
-                ToggleBreakpoint(args);
-                break;
-            case "breaks":
-                ListBreakpoints();
-                break;
-            case "dis":
-                Disassemble(args);
-                break;
-            case "sample":
-                LoadSample();
-                break;
-            case "tty":
-                HandleTty(args);
-                break;
-            case "ptr":
-                HandlePtr(args);
-                break;
-            case "ptp":
-                HandlePtp(args);
-                break;
-            case "lpt":
-                HandleLpt(args);
-                break;
-            case "web":
-                HandleWeb(args);
-                break;
-            case "jsp":
-                HandleJsp(args);
-                break;
-            case "wdt":
-                HandleWatchdog(args);
-                break;
-            case "asm":
-            case "assemble":
-                AssembleFileCommand(args);
-                break;
-            default:
-                Console.WriteLine($"Unknown command '{command}'. Type 'help' for options.");
-                break;
+            var token = stream.Next();
+            if (TryParseNumber(token, out var value))
+            {
+                PushStack(value);
+                continue;
+            }
+
+            if (_words.TryGetValue(token, out var action))
+            {
+                try
+                {
+                    action(stream);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"? {ex.Message}");
+                }
+
+                if (_quit && _allowExit)
+                {
+                    break;
+                }
+
+                continue;
+            }
+
+            Console.WriteLine($"Unknown command '{token}'. Type 'help' for options.");
         }
 
-        return true;
+        return !_quit;
     }
 
     private void ShowHelp(string[] args)
@@ -317,6 +242,7 @@ public class NovaMonitor
         _cpu.Reset(start);
         _watchdog?.ResetDeviceState();
         _breakpoints.Clear();
+        _stackDepth = 0;
         Console.WriteLine($"CPU reset. PC={NovaCpu.FormatWord(_cpu.ProgramCounter)}");
     }
 
@@ -1655,7 +1581,18 @@ LIMIT:  DW 0
         text = text.Trim();
         var style = NumberStyles.AllowLeadingSign;
         int radix;
-        if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        if (text.StartsWith("#", StringComparison.OrdinalIgnoreCase))
+        {
+            radix = 10;
+            text = text[1..];
+        }
+        else if (text.StartsWith("$", StringComparison.OrdinalIgnoreCase))
+        {
+            radix = 16;
+            text = text[1..];
+            style |= NumberStyles.AllowHexSpecifier;
+        }
+        else if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
         {
             radix = 16;
             text = text[2..];
@@ -1768,8 +1705,326 @@ LIMIT:  DW 0
             ["web"] = "web <cmd> ...        WEB helper (open/print/status)",
             ["jsp"] = "jsp status           Show JSP status",
             ["wdt"] = "wdt <cmd> [args]     Configure watchdog timer",
-            ["exit"] = "exit                 Quit the monitor"
+            ["exit"] = "exit                 Quit the monitor",
+            ["."] = ".                    Pop and print top of stack",
+            ["dup"] = "dup                  Duplicate top of stack",
+            ["drop"] = "drop                 Drop top of stack",
+            ["swap"] = "swap                 Swap top two stack items",
+            ["over"] = "over                 Copy second item to top",
+            ["+"] = "+                    Add top two items",
+            ["-"] = "-                    Subtract top two items",
+            ["and"] = "and                  Bitwise AND top two items",
+            ["or"] = "or                   Bitwise OR top two items",
+            ["xor"] = "xor                  Bitwise XOR top two items",
+            ["invert"] = "invert               Bitwise invert top item",
+            ["!"] = "!                    Store value at address",
+            ["@"] = "@                    Fetch value from address"
         };
+    }
+
+    private Dictionary<string, Action<TokenStream>> BuildWordTable()
+    {
+        return new Dictionary<string, Action<TokenStream>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["help"] = stream => ShowHelp(CollectTokenArgs(stream, maxCount: 1)),
+            ["reset"] = stream => Reset(CollectArgs(stream, maxCount: 1)),
+            ["regs"] = _ => DumpRegisters(),
+            ["r"] = _ => DumpRegisters(),
+            ["exam"] = stream => Examine(CollectArgs(stream, maxCount: 2)),
+            ["x"] = stream => Examine(CollectArgs(stream, maxCount: 2)),
+            ["deposit"] = stream => Deposit(CollectNumberArgs(stream, minCount: 1)),
+            ["dep"] = stream => Deposit(CollectNumberArgs(stream, minCount: 1)),
+            ["d"] = stream => Deposit(CollectNumberArgs(stream, minCount: 1)),
+            ["step"] = stream => Step(CollectArgs(stream, maxCount: 1)),
+            ["s"] = stream => Step(CollectArgs(stream, maxCount: 1)),
+            ["trace"] = stream => Trace(CollectArgs(stream, maxCount: 1)),
+            ["t"] = stream => Trace(CollectArgs(stream, maxCount: 1)),
+            ["run"] = stream => RunUntilHalt(CollectArgs(stream, maxCount: 1)),
+            ["go"] = stream => RunFromAddress(CollectArgs(stream, maxCount: 2)),
+            ["tc"] = stream => HandleTc(CollectRemainingArgs(stream)),
+            ["tc0"] = stream => HandleTcUnit(0, CollectRemainingArgs(stream)),
+            ["tc1"] = stream => HandleTcUnit(1, CollectRemainingArgs(stream)),
+            ["rtc"] = stream => HandleRtc(CollectRemainingArgs(stream)),
+            ["devices"] = _ => ShowDevices(),
+            ["devs"] = _ => ShowDevices(),
+            ["break"] = stream => ToggleBreakpoint(CollectArgs(stream, maxCount: 1)),
+            ["b"] = stream => ToggleBreakpoint(CollectArgs(stream, maxCount: 1)),
+            ["breaks"] = _ => ListBreakpoints(),
+            ["dis"] = stream => Disassemble(CollectArgs(stream, maxCount: 2)),
+            ["sample"] = _ => LoadSample(),
+            ["tty"] = stream => HandleTty(CollectRemainingArgs(stream)),
+            ["ptr"] = stream => HandlePtr(CollectRemainingArgs(stream)),
+            ["ptp"] = stream => HandlePtp(CollectRemainingArgs(stream)),
+            ["lpt"] = stream => HandleLpt(CollectRemainingArgs(stream)),
+            ["web"] = stream => HandleWeb(CollectRemainingArgs(stream)),
+            ["jsp"] = stream => HandleJsp(CollectRemainingArgs(stream)),
+            ["wdt"] = stream => HandleWatchdog(CollectRemainingArgs(stream)),
+            ["asm"] = stream => AssembleFileCommand(CollectRemainingArgs(stream)),
+            ["assemble"] = stream => AssembleFileCommand(CollectRemainingArgs(stream)),
+            ["q"] = _ => Exit(),
+            ["quit"] = _ => Exit(),
+            ["exit"] = _ => Exit(),
+            ["."] = _ => PrintTop(),
+            ["dup"] = _ => Dup(),
+            ["drop"] = _ => Drop(),
+            ["swap"] = _ => Swap(),
+            ["over"] = _ => Over(),
+            ["+"] = _ => BinOp((a, b) => a + b),
+            ["-"] = _ => BinOp((a, b) => a - b),
+            ["and"] = _ => BinOp((a, b) => a & b),
+            ["or"] = _ => BinOp((a, b) => a | b),
+            ["xor"] = _ => BinOp((a, b) => a ^ b),
+            ["invert"] = _ => UnaryOp(a => ~a),
+            ["!"] = _ => StoreWord(),
+            ["@"] = _ => FetchWord()
+        };
+    }
+
+    private void Exit()
+    {
+        if (!_allowExit)
+        {
+            Console.WriteLine("Exit is disabled on the unix console.");
+            return;
+        }
+
+        _quit = true;
+    }
+
+    private static List<string> Tokenize(string line)
+    {
+        var tokens = new List<string>();
+        var current = new StringBuilder();
+        var inQuotes = false;
+
+        foreach (var ch in line)
+        {
+            if (ch == '"')
+            {
+                inQuotes = !inQuotes;
+                continue;
+            }
+
+            if (!inQuotes && char.IsWhiteSpace(ch))
+            {
+                if (current.Length > 0)
+                {
+                    tokens.Add(current.ToString());
+                    current.Clear();
+                }
+
+                continue;
+            }
+
+            current.Append(ch);
+        }
+
+        if (current.Length > 0)
+        {
+            tokens.Add(current.ToString());
+        }
+
+        return tokens;
+    }
+
+    private string[] CollectArgs(TokenStream stream, int maxCount)
+    {
+        var args = new List<string>(maxCount);
+        while (args.Count < maxCount && stream.TryPeek(out var token))
+        {
+            if (!TryParseNumber(token, out _))
+            {
+                break;
+            }
+
+            stream.Next();
+            args.Add(token);
+        }
+
+        return args.ToArray();
+    }
+
+    private string[] CollectTokenArgs(TokenStream stream, int maxCount)
+    {
+        var args = new List<string>(maxCount);
+        while (args.Count < maxCount && stream.TryNext(out var token))
+        {
+            args.Add(token);
+        }
+
+        return args.ToArray();
+    }
+
+    private string[] CollectNumberArgs(TokenStream stream, int minCount)
+    {
+        var args = new List<string>();
+        while (stream.TryPeek(out var token) && TryParseNumber(token, out _))
+        {
+            stream.Next();
+            args.Add(token);
+        }
+
+        if (args.Count < minCount)
+        {
+            return Array.Empty<string>();
+        }
+
+        return args.ToArray();
+    }
+
+    private string[] CollectRemainingArgs(TokenStream stream)
+    {
+        var args = new List<string>();
+        while (stream.TryNext(out var token))
+        {
+            args.Add(token);
+        }
+
+        return args.ToArray();
+    }
+
+    private void PrintTop()
+    {
+        RequireStack(1);
+        Console.WriteLine(NovaCpu.FormatWord(PopStack()));
+    }
+
+    private void Dup()
+    {
+        RequireStack(1);
+        PushStack(PeekStack());
+    }
+
+    private void Drop()
+    {
+        RequireStack(1);
+        _ = PopStack();
+    }
+
+    private void Swap()
+    {
+        RequireStack(2);
+        var a = PopStack();
+        var b = PopStack();
+        PushStack(a);
+        PushStack(b);
+    }
+
+    private void Over()
+    {
+        RequireStack(2);
+        var a = PopStack();
+        var b = PopStack();
+        PushStack(b);
+        PushStack(a);
+        PushStack(b);
+    }
+
+    private void BinOp(Func<int, int, int> op)
+    {
+        RequireStack(2);
+        var b = PopStack();
+        var a = PopStack();
+        PushStack((ushort)op(a, b));
+    }
+
+    private void UnaryOp(Func<int, int> op)
+    {
+        RequireStack(1);
+        var a = PopStack();
+        PushStack((ushort)op(a));
+    }
+
+    private void StoreWord()
+    {
+        RequireStack(2);
+        var address = PopStack();
+        var value = PopStack();
+        _cpu.WriteMemory(address, value);
+    }
+
+    private void FetchWord()
+    {
+        RequireStack(1);
+        var address = PopStack();
+        PushStack(_cpu.ReadMemory(address));
+    }
+
+    private void RequireStack(int count)
+    {
+        if (_stackDepth < count)
+        {
+            throw new InvalidOperationException("stack underflow");
+        }
+    }
+
+    private void PushStack(ushort value)
+    {
+        if (_stackDepth >= MonitorStackSize)
+        {
+            throw new InvalidOperationException("stack overflow");
+        }
+
+        var address = (ushort)(MonitorStackBase + _stackDepth);
+        _cpu.WriteMemory(address, value);
+        _stackDepth++;
+    }
+
+    private ushort PopStack()
+    {
+        RequireStack(1);
+        _stackDepth--;
+        var address = (ushort)(MonitorStackBase + _stackDepth);
+        return _cpu.ReadMemory(address);
+    }
+
+    private ushort PeekStack()
+    {
+        RequireStack(1);
+        var address = (ushort)(MonitorStackBase + _stackDepth - 1);
+        return _cpu.ReadMemory(address);
+    }
+
+    internal sealed class TokenStream
+    {
+        private readonly List<string> _tokens;
+        private int _index;
+
+        public TokenStream(List<string> tokens)
+        {
+            _tokens = tokens;
+        }
+
+        public bool HasMore => _index < _tokens.Count;
+
+        public string Next()
+        {
+            return _tokens[_index++];
+        }
+
+        public bool TryNext(out string token)
+        {
+            if (!HasMore)
+            {
+                token = string.Empty;
+                return false;
+            }
+
+            token = Next();
+            return true;
+        }
+
+        public bool TryPeek(out string token)
+        {
+            if (!HasMore)
+            {
+                token = string.Empty;
+                return false;
+            }
+
+            token = _tokens[_index];
+            return true;
+        }
     }
 
     private static string FormatDeviceCode(int deviceCode)
