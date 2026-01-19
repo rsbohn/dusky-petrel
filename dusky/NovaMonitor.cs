@@ -62,12 +62,12 @@ public class NovaMonitor
 
     public void Run()
     {
-        Console.WriteLine("snova - Data General Nova 1210 emulator");
+        Console.WriteLine("dusky - Data General Nova 1210 emulator");
         Console.WriteLine("Type 'help' for command summary. Numbers default to octal; use 0x/0o/0b, # decimal, $ hex.");
         _quit = false;
         while (!_quit)
         {
-            Console.Write("snova> ");
+            Console.Write("dusky> ");
             var line = Console.ReadLine();
             if (line is null)
             {

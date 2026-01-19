@@ -3,9 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "snova", "snova", "{0D150164-8998-9BBD-7521-105C9512E9A6}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "dusky", "dusky", "{0D150164-8998-9BBD-7521-105C9512E9A6}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Snova", "snova\Snova.csproj", "{5425351A-A5C4-4C39-84EA-1F3A30531027}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Snova", "dusky\Snova.csproj", "{5425351A-A5C4-4C39-84EA-1F3A30531027}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Snova.Tests", "snova.tests\Snova.Tests.csproj", "{2F0D79A1-2D5D-4F41-9E5F-1F06A0E82E73}"
 EndProject

@@ -6,12 +6,12 @@ Minimal Data General Nova 1210 emulator with an interactive monitor and built-in
 
 Build:
 ```
-dotnet build snova/Snova.csproj -c Release
+dotnet build dusky/Snova.csproj -c Release
 ```
 
 Run:
 ```
-dotnet run --project snova/Snova.csproj
+dotnet run --project dusky/Snova.csproj
 ```
 
 ## Monitor Basics

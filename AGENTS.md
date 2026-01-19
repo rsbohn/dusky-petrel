@@ -1,12 +1,12 @@
 # Dusky Petrel Agent Notes
 
 ## Project
-- `snova/` is a minimal Data General Nova 1210 emulator and monitor.
-- The monitor is interactive and runs from `snova/Program.cs`.
+- `dusky/` is a minimal Data General Nova 1210 emulator and monitor.
+- The monitor is interactive and runs from `dusky/Program.cs`.
 
 ## Build & Run
-- Build: `dotnet build snova/Snova.csproj -c Release`
-- Run: `dotnet run --project snova/Snova.csproj`
+- Build: `dotnet build dusky/Snova.csproj -c Release`
+- Run: `dotnet run --project dusky/Snova.csproj`
 
 ## Emulator Conventions
 - Memory: 32K words (15-bit addresses), 16-bit words, octal by default.
