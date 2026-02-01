@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -24,6 +25,7 @@ public class NovaMonitor
     private readonly NovaJsonDevice? _json;
     private readonly HashSet<ushort> _breakpoints = new();
     private readonly Dictionary<string, string> _helpText;
+    private readonly Dictionary<string, HelpTopic> _helpTopics;
     private readonly Dictionary<string, Action<TokenStream>> _words;
     private readonly object _commandLock = new();
     private string? _webUrl;
@@ -58,6 +60,7 @@ public class NovaMonitor
         _cpu.Reset();
         _watchdog?.ResetDeviceState();
         _helpText = BuildHelp();
+        _helpTopics = BuildHelpTopics();
         _words = BuildWordTable();
     }
 
@@ -176,24 +179,32 @@ public class NovaMonitor
     {
         if (args.Length == 0)
         {
-            Console.WriteLine("Available commands:");
-            foreach (var kvp in _helpText)
+            Console.WriteLine("dusky monitor help");
+            Console.WriteLine("Topics:");
+            foreach (var kvp in _helpTopics.OrderBy(kvp => kvp.Key))
             {
-                Console.WriteLine($"   {kvp.Key,-12} {kvp.Value}");
+                Console.WriteLine($"   {kvp.Key,-12} {kvp.Value.Summary}");
             }
+
+            Console.WriteLine("Type 'help <topic>' for details. Use 'help commands' for the command list.");
 
             return;
         }
 
         var key = args[0].ToLowerInvariant();
+        if (_helpTopics.TryGetValue(key, out var topic))
+        {
+            topic.Print();
+            return;
+        }
+
         if (_helpText.TryGetValue(key, out var details))
         {
             Console.WriteLine(details);
+            return;
         }
-        else
-        {
-            Console.WriteLine($"No help entry for '{key}'.");
-        }
+
+        Console.WriteLine($"No help entry for '{key}'.");
     }
 
     private void ShowDevices()
@@ -1721,6 +1732,76 @@ LIMIT:  DW 0
             ["@"] = "@                    Fetch value from address"
         };
     }
+
+    private Dictionary<string, HelpTopic> BuildHelpTopics()
+    {
+        return new Dictionary<string, HelpTopic>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["commands"] = new HelpTopic(
+                "List all monitor commands",
+                ShowCommandList),
+            ["cpu"] = new HelpTopic(
+                "CPU controls (limit/reset/run/step/trace)",
+                ShowCpuHelp),
+            ["devices"] = new HelpTopic(
+                "Device commands (lpt, ptr, ptp, tc, rtc, tty, web, jsp, wdt)",
+                ShowDeviceHelp),
+            ["stack"] = new HelpTopic(
+                "Stack operations, arithmetic, and memory access",
+                ShowStackHelp)
+        };
+    }
+
+    private void ShowCommandList()
+    {
+        Console.WriteLine("Available commands:");
+        foreach (var kvp in _helpText.OrderBy(kvp => kvp.Key))
+        {
+            Console.WriteLine($"   {kvp.Key,-12} {kvp.Value}");
+        }
+    }
+
+    private void ShowStackHelp()
+    {
+        Console.WriteLine("Stack overview:");
+        Console.WriteLine("  - Literal numbers push 16-bit values (default octal).");
+        Console.WriteLine($"  - Stack depth is {MonitorStackSize} words.");
+        Console.WriteLine("  - '.' pops and prints the top of stack.");
+        Console.WriteLine("  - dup/drop/swap/over manipulate the top entries.");
+        Console.WriteLine("  - + - and or xor invert perform arithmetic/bitwise ops.");
+        Console.WriteLine("  - '@' fetches memory at address on stack.");
+        Console.WriteLine("  - '!' stores value at address (value addr --).");
+    }
+
+    private void ShowDeviceHelp()
+    {
+        Console.WriteLine("Device commands:");
+        Console.WriteLine("  - devices           List attached I/O devices");
+        Console.WriteLine("  - tty read <file>   Queue input bytes for console TTI");
+        Console.WriteLine("  - ptr read <file>   Queue input bytes for paper tape reader");
+        Console.WriteLine("  - ptp attach <file> Set output file for paper tape punch");
+        Console.WriteLine("  - lpt status        Show line printer output path");
+        Console.WriteLine("  - tc status         Show TC08 drive status");
+        Console.WriteLine("  - tc0 <cmd> ...     TC08 unit 0 (attach/read/write/verify/index)");
+        Console.WriteLine("  - tc1 <cmd> ...     TC08 unit 1 (attach/read/write/verify/index)");
+        Console.WriteLine("  - rtc status        Show RTC status");
+        Console.WriteLine("  - web <cmd> ...     WEB helper (open/print/status)");
+        Console.WriteLine("  - jsp status        Show JSP status");
+        Console.WriteLine("  - wdt <cmd> [args]  Configure watchdog timer");
+    }
+
+    private void ShowCpuHelp()
+    {
+        Console.WriteLine("CPU controls:");
+        Console.WriteLine("  - cpu limit [n]     Set default run limit (0 = unlimited)");
+        Console.WriteLine("  - reset [addr]      Reset CPU and clear memory (start at optional addr)");
+        Console.WriteLine("  - run [n]           Run until HALT/breakpoint or n instructions");
+        Console.WriteLine("  - step [n]          Step through n instructions");
+        Console.WriteLine("  - trace [n]         Trace n instructions with registers");
+        Console.WriteLine("  - go <addr> [n]     Set PC and run until HALT/breakpoint or n instructions");
+    }
+
+    private sealed record HelpTopic(string Summary, Action Print);
 
     private Dictionary<string, Action<TokenStream>> BuildWordTable()
     {
