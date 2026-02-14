@@ -20,12 +20,13 @@ Numbers default to octal; use `0x` for hex.
 
 - `help` or `help <cmd>`
 - `reset [addr]`
-- `go <addr> [n]` run from address (optional step limit)
+- `go <addr|symbol> [n]` run from address or symbol (optional step limit)
 - `run [n]` run until HALT/breakpoint (optional step limit)
 - `step [n]`
 - `exam <addr> [n]`
 - `deposit <addr> <value> [value2 ...]`
 - `dis <addr> [n]`
+- `syms` list loaded assembler symbols
 - `break <addr>`, `breaks`
 - `asm <file> [addr]`
 - `tty read <file>` queue input with ASCII EOT (0x04)

@@ -27,6 +27,7 @@ public class NovaMonitor
     private readonly Dictionary<string, string> _helpText;
     private readonly Dictionary<string, HelpTopic> _helpTopics;
     private readonly Dictionary<string, Action<TokenStream>> _words;
+    private readonly Dictionary<string, int> _symbols = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _commandLock = new();
     private string? _webUrl;
     private bool _quit;
@@ -390,9 +391,16 @@ public class NovaMonitor
 
     private void RunFromAddress(string[] args)
     {
-        if (args.Length == 0 || !TryParseNumber(args[0], out var start))
+        if (args.Length == 0)
         {
-            Console.WriteLine("Usage: go <addr> [n]");
+            Console.WriteLine("Usage: go <addr|symbol> [n]");
+            return;
+        }
+
+        if (!TryParseAddressOrSymbol(args[0], out var start, out var error))
+        {
+            Console.WriteLine(error);
+            Console.WriteLine("Usage: go <addr|symbol> [n]");
             return;
         }
 
@@ -434,6 +442,28 @@ public class NovaMonitor
         }
 
         return _defaultStepLimit;
+    }
+
+    private bool TryParseAddressOrSymbol(string token, out ushort address, out string? error)
+    {
+        if (TryParseNumber(token, out address))
+        {
+            error = null;
+            return true;
+        }
+
+        if (_symbols.TryGetValue(token, out var value))
+        {
+            address = (ushort)(value & NovaCpu.AddressMask);
+            error = null;
+            return true;
+        }
+
+        address = 0;
+        error = _symbols.Count == 0
+            ? $"Unknown symbol '{token}'. Assemble a file to load symbols."
+            : $"Unknown symbol '{token}'.";
+        return false;
     }
 
     private void HandleCpu(string[] args)
@@ -1410,6 +1440,12 @@ LIMIT:  DW 0
             }
         }
 
+        _symbols.Clear();
+        foreach (var (name, value) in result.Symbols)
+        {
+            _symbols[name] = value;
+        }
+
         if (listOnly)
         {
             foreach (var word in result.Words.OrderBy(w => w.Address))
@@ -1696,7 +1732,7 @@ LIMIT:  DW 0
             ["step"] = "step [n]             Step through n instructions",
             ["trace"] = "trace [n]            Trace n instructions with registers",
             ["run"] = "run [n]              Run until HALT/breakpoint or n instructions",
-            ["go"] = "go <addr> [n]        Set PC and run until HALT/breakpoint or n instructions",
+            ["go"] = "go <addr|symbol> [n] Set PC and run until HALT/breakpoint or n instructions",
             ["cpu"] = "cpu limit [n]        Set default run limit (0 = unlimited)",
             ["devices"] = "devices              List attached I/O devices",
             ["rtc"] = "rtc status            Show RTC status",
@@ -1706,6 +1742,7 @@ LIMIT:  DW 0
             ["break"] = "break <addr>         Toggle breakpoint",
             ["breaks"] = "breaks              List breakpoints",
             ["dis"] = "dis <addr> [n]       Disassemble n words from addr",
+            ["syms"] = "syms                 List loaded assembler symbols",
             ["sample"] = "sample               Load a small counting demo at 0200",
             ["asm"] = "asm <file> [addr]    Assemble file and load into memory",
             ["asm -l"] = "asm -l <file>        Print assembler listing",
@@ -1761,6 +1798,22 @@ LIMIT:  DW 0
         }
     }
 
+    private void ShowSymbols()
+    {
+        if (_symbols.Count == 0)
+        {
+            Console.WriteLine("No symbols loaded.");
+            return;
+        }
+
+        Console.WriteLine($"Symbols ({_symbols.Count}):");
+        foreach (var kvp in _symbols.OrderBy(kvp => kvp.Key))
+        {
+            var address = (ushort)(kvp.Value & NovaCpu.AddressMask);
+            Console.WriteLine($"  {kvp.Key,-16} {NovaCpu.FormatWord(address)}");
+        }
+    }
+
     private void ShowStackHelp()
     {
         Console.WriteLine("Stack overview:");
@@ -1798,7 +1851,7 @@ LIMIT:  DW 0
         Console.WriteLine("  - run [n]           Run until HALT/breakpoint or n instructions");
         Console.WriteLine("  - step [n]          Step through n instructions");
         Console.WriteLine("  - trace [n]         Trace n instructions with registers");
-        Console.WriteLine("  - go <addr> [n]     Set PC and run until HALT/breakpoint or n instructions");
+        Console.WriteLine("  - go <addr|symbol> [n] Set PC and run until HALT/breakpoint or n instructions");
     }
 
     private sealed record HelpTopic(string Summary, Action Print);
@@ -1821,7 +1874,7 @@ LIMIT:  DW 0
             ["trace"] = stream => Trace(CollectArgs(stream, maxCount: 1)),
             ["t"] = stream => Trace(CollectArgs(stream, maxCount: 1)),
             ["run"] = stream => RunUntilHalt(CollectArgs(stream, maxCount: 1)),
-            ["go"] = stream => RunFromAddress(CollectArgs(stream, maxCount: 2)),
+            ["go"] = stream => RunFromAddress(CollectTokenArgs(stream, maxCount: 2)),
             ["tc"] = stream => HandleTc(CollectRemainingArgs(stream)),
             ["tc0"] = stream => HandleTcUnit(0, CollectRemainingArgs(stream)),
             ["tc1"] = stream => HandleTcUnit(1, CollectRemainingArgs(stream)),
@@ -1832,6 +1885,7 @@ LIMIT:  DW 0
             ["b"] = stream => ToggleBreakpoint(CollectArgs(stream, maxCount: 1)),
             ["breaks"] = _ => ListBreakpoints(),
             ["dis"] = stream => Disassemble(CollectArgs(stream, maxCount: 2)),
+            ["syms"] = _ => ShowSymbols(),
             ["sample"] = _ => LoadSample(),
             ["tty"] = stream => HandleTty(CollectRemainingArgs(stream)),
             ["ptr"] = stream => HandlePtr(CollectRemainingArgs(stream)),

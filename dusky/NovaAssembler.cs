@@ -211,6 +211,12 @@ public sealed class NovaAssembler
             result.StartAddress = result.Words.Min(w => w.Address);
         }
 
+        result.Symbols.Clear();
+        foreach (var (name, value) in symbols)
+        {
+            result.Symbols[name] = value;
+        }
+
         return result;
     }
 
@@ -1389,6 +1395,7 @@ public sealed class AssemblerResult
 {
     public List<AssemblerDiagnostic> Diagnostics { get; } = new();
     public List<AssembledWord> Words { get; } = new();
+    public Dictionary<string, int> Symbols { get; } = new(StringComparer.OrdinalIgnoreCase);
     public ushort? StartAddress { get; set; }
     public bool Success => Diagnostics.All(d => d.Severity != DiagnosticSeverity.Error);
 }
