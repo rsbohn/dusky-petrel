@@ -67,3 +67,4 @@ Blocks are 129 words (128 data + 1 spare). Drives are `TC0` and `TC1`.
 ## Samples
 
 Sample assembly programs live in `sd/`.
+Try `sd/moon.asm` for a WEB + JSP example that prints moon phase, moonrise, and moonset for Denver.
