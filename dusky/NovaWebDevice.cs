@@ -318,6 +318,7 @@ public sealed class NovaWebDevice : INovaIoDevice
         try
         {
             using var request = new HttpRequestMessage(method, uri);
+            request.Headers.UserAgent.ParseAdd("dusky-petrel/1.0");
             using var response = _client.SendAsync(request).GetAwaiter().GetResult();
             _statusCode = (int)response.StatusCode;
 

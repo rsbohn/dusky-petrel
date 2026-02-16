@@ -137,11 +137,11 @@ PT_WAIT:
 
 URL:    .TXT "https://api.met.no/weatherapi/sunrise/3.0/moon?lat=39.7392&lon=-104.9903&offset=-07:00"
         DW 0
-Q1:     .TXT "/properties/moonphase/value"
+Q1:     .TXT "/properties/moonphase"
         DW 0
-Q2:     .TXT "/properties/rise/time"
+Q2:     .TXT "/properties/moonrise/time"
         DW 0
-Q3:     .TXT "/properties/set/time"
+Q3:     .TXT "/properties/moonset/time"
         DW 0
 LBL1:   .TXT "Moon phase: "
         DW 0
