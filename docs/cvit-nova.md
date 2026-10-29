@@ -151,12 +151,17 @@ go 1000
 ```
 
 Expected: kernel banner, COMMAND auto-loads from disk, `]` prompt.
-`STA` → `TC0: CVNV READY`; `CAT` → lists `COMMAND` and `README.MD`;
-`FOO` → `?WHAT`; EOT → HALT.
+`STA` → `TC0: CVNV READY`; `CAT` → lists directory names;
+`TYPE <name>` → prints file contents; `FOO` → `?WHAT`; EOT → HALT.
 
 ## Status
 
 - [x] Kernel jump table with GETC/PUTC/PUTS (vectors `0o1006`-`0o1010`)
+- [x] COMMAND uses kernel services; no duplicate device drivers
+- [x] Cold start loads COMMAND from disk; EOT returns to kernel HALT
+- [x] STA, CAT, and TYPE commands
+- [ ] RUN command (next)
+- [ ] Nova FOCAL with software floating point (after RUN)
 - [x] COMMAND uses kernel services; no duplicate device drivers
 - [x] Cold start loads COMMAND from disk; EOT returns to kernel HALT
 - [x] STA and CAT preserved
