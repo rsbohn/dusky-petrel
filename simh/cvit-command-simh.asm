@@ -1,17 +1,15 @@
-; cvit/Nova minimal command interpreter — SIMH DSK adaptation
-; Adapted from sd/cvit-command.asm (dusky-petrel branch 1028) for SIMH Nova.
-; Load with: abs adapted/cvit-command-simh.asm command.abs --format simh-load --start 3000
-;   then in SIMH: load command.abs ; go 3000
-; Storage and console changes mirror cvit-kernel-simh.asm: DSK sectors
-; (one TC08 block per sector, sector = drive * 1024 + block), DOAS output,
-; DIAC input. Block reads/writes move a full 256-word sector; only the
-; first 128 words are payload.
+; cvit/Nova command interpreter
 ; Load with: asm sd/cvit-command.asm 0o3000
+; (Normally loaded from the CVIT filesystem by the kernel cold start;
+;  see docs/cvit-nova.md.)
+;
+; All console and disk I/O goes through the kernel jump table at 0o1000;
+; this file holds no device drivers of its own.
 ;
 ; Commands:
 ;   CAT    read TC0 block 1 into 0o7600 and list flat directory names
 ;   STA    read TC0 block 0 and report volume status
-;   EOT    halt
+;   EOT    return to the kernel, which halts
 
 ; Keep mutable cells and constants on page zero so code at 0o3000 can reach them.
         ORG 0o0050
@@ -22,7 +20,6 @@ NEG1:    DW 0o177777
 FIVE:    DW 5
 NENTS:   DW 0o12
 ENTWORDS:DW 0o14
-DSKOFF:  DW 0o2000
 
 RBRACK:  DW 0o135
 CHC:     DW 0o103
@@ -36,12 +33,16 @@ SPACE:   DW 0o040
 MAGIC0:  DW 0o41526    ; "CV"
 MAGIC1:  DW 0o47126    ; "NV"
 
-PUTCP:   DW PUTC
-PUTSP:   DW PUTS
+; Kernel vectors (stable jump table at 0o1000).
+KQUITP:  DW 0o1003
+KRDBLKP: DW 0o1004
+KGETCP:  DW 0o1006
+KPUTCP:  DW 0o1007
+KPUTSP:  DW 0o1010
+
 GETLINEP:DW GETLINE
 PNAMEP:  DW PNAME
 PNCHP:   DW PNCH
-READBLKP:DW READBLK
 LINEP:   DW LINE
 DIRP:    DW 0o7600
 RDBCBP:  DW RDBCB
@@ -54,10 +55,7 @@ CATHEADP:DW CATHEAD
 STAMSGP: DW STAMSG
 NLP:     DW NL
 
-PUTCRET: DW 0
-PUTSRET: DW 0
 GLRET:   DW 0
-RDBRET:  DW 0
 PNRET:   DW 0
 PNCHRET: DW 0
 CH:      DW 0
@@ -79,17 +77,49 @@ LINE:    DW 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 
         ORG 0o3000
 
-START:  LDA AC2, HELLOP
-        JSR @PUTSP
+; START: copy the page-zero image to 0o0050, then run.
+; The disk image stores: word 0 = n1 (page-zero word count), then n1
+; page-zero words, then the code words.  Uses only the code-local cells
+; below (AC2/AC3 are the index registers; page zero is not live until
+; CPYDONE).
+START:  LDA AC2, P_LOAD
+        LDA AC3, P_PZDST
+        LDA AC0, 0,AC2
+        STA AC0, P_CNT
+        LDA AC0, P_ONE
+        ADD AC0, AC2
+CPYLP:  LDA AC0, P_CNT
+        MOV AC0, AC0, SNR
+        JMP CPYDONE
+        LDA AC0, 0,AC2
+        STA AC0, 0,AC3
+        LDA AC0, P_ONE
+        ADD AC0, AC2
+        ADD AC0, AC3
+        LDA AC0, P_CNT
+        LDA AC1, P_NEG1
+        ADD AC1, AC0
+        STA AC0, P_CNT
+        JMP CPYLP
+CPYDONE:LDA AC2, HELLOP
+        JSR @KPUTSP
+        JMP PROMPT
+
+; Code-local prologue cells (valid before page zero is live).
+P_LOAD:  DW 0o3000
+P_PZDST: DW 0o0050
+P_CNT:   DW 0
+P_ONE:   DW 1
+P_NEG1:  DW 0o177777
 
 PROMPT: LDA AC0, RBRACK
-        JSR @PUTCP
+        JSR @KPUTCP
         LDA AC2, LINEP
         JSR @GETLINEP
         LDA AC0, EOTSEEN
         MOV AC0, AC0, SNR
         JMP CHECK
-        HALT
+        JMP @KQUITP
 
 CHECK:  LDA AC2, LINEP
         LDA AC0, 0,AC2
@@ -136,21 +166,21 @@ CHK_STA:LDA AC2, LINEP
         JMP BAD
 
 BAD:    LDA AC2, BADP
-        JSR @PUTSP
+        JSR @KPUTSP
         JMP PROMPT
 
 DO_CAT: LDA AC2, RDBCBP
-        JSR @READBLKP
+        JSR @KRDBLKP
         LDA AC3, ONE
         SUBZ AC3, AC0
         MOV AC0, AC0, SNR
         JMP CAT_OK
         LDA AC2, DSKERRP
-        JSR @PUTSP
+        JSR @KPUTSP
         JMP PROMPT
 
 CAT_OK: LDA AC2, CATHEADP
-        JSR @PUTSP
+        JSR @KPUTSP
         LDA AC3, DIRP
         STA AC3, ENTPTR
         LDA AC3, NENTS
@@ -161,7 +191,7 @@ CATLP:  LDA AC2, ENTPTR
         JMP CATDONE
         JSR @PNAMEP
         LDA AC2, NLP
-        JSR @PUTSP
+        JSR @KPUTSP
         LDA AC3, ENTPTR
         LDA AC0, ENTWORDS
         ADD AC0, AC3
@@ -176,13 +206,13 @@ CATLP:  LDA AC2, ENTPTR
 CATDONE:JMP PROMPT
 
 DO_STA: LDA AC2, STACBP
-        JSR @READBLKP
+        JSR @KRDBLKP
         LDA AC3, ONE
         SUBZ AC3, AC0
         MOV AC0, AC0, SNR
         JMP STA_IOK
         LDA AC2, DSKERRP
-        JSR @PUTSP
+        JSR @KPUTSP
         JMP PROMPT
 STA_IOK:LDA AC2, DIRP
         LDA AC0, 0,AC2
@@ -191,7 +221,7 @@ STA_IOK:LDA AC2, DIRP
         MOV AC0, AC0, SNR
         JMP STA_M1
         LDA AC2, VOLERRP
-        JSR @PUTSP
+        JSR @KPUTSP
         JMP PROMPT
 STA_M1: LDA AC2, DIRP
         LDA AC0, 1,AC2
@@ -200,37 +230,19 @@ STA_M1: LDA AC2, DIRP
         MOV AC0, AC0, SNR
         JMP STA_OK
         LDA AC2, VOLERRP
-        JSR @PUTSP
+        JSR @KPUTSP
         JMP PROMPT
 STA_OK: LDA AC2, STAMSGP
-        JSR @PUTSP
+        JSR @KPUTSP
         JMP PROMPT
 
-; ---- console ----
+; ---- console input ----
+; GETLINE: AC2 destination, zero-terminates. Sets EOTSEEN. Echoes via kernel.
 
-PUTC:   STA AC3, PUTCRET
-PWAIT:  SKPBZ TTO
-        JMP PWAIT
-        DOAS AC0, TTO
-        JMP @PUTCRET
-
-; PUTS: AC2 points to zero-terminated one-char-per-word string.
-PUTS:   STA AC3, PUTSRET
-PSLP:   LDA AC0, 0,AC2
-        MOV AC0, AC0, SNR
-        JMP @PUTSRET
-        JSR @PUTCP
-        LDA AC0, ONE
-        ADD AC0, AC2
-        JMP PSLP
-
-; GETLINE: AC2 destination, zero-terminates. Sets EOTSEEN.
 GETLINE:STA AC3, GLRET
         LDA AC0, ZERO
         STA AC0, EOTSEEN
-GLLP:   SKPDN TTI
-        JMP GLLP
-        DIAC AC0, TTI
+GLLP:   JSR @KGETCP
         STA AC0, CH
         LDA AC3, EOT
         SUBZ AC3, AC0
@@ -248,7 +260,7 @@ GLLP:   SKPDN TTI
         JMP GL_DONE
         LDA AC0, CH
         STA AC0, 0,AC2
-        JSR @PUTCP
+        JSR @KPUTCP
         LDA AC0, ONE
         ADD AC0, AC2
         JMP GLLP
@@ -257,7 +269,7 @@ GL_EOT: LDA AC0, ONE
 GL_DONE:LDA AC0, ZERO
         STA AC0, 0,AC2
         LDA AC2, NLP
-        JSR @PUTSP
+        JSR @KPUTSP
         JMP @GLRET
 
 ; PNAME: AC2 points to directory entry. Prints five packed name words.
@@ -288,33 +300,8 @@ PNCH:   STA AC3, PNCHRET
         MOV AC0, AC0, SNR
         JMP @PNCHRET
         LDA AC0, PNCHAR
-        JSR @PUTCP
+        JSR @KPUTCP
         JMP @PNCHRET
-
-; ---- SIMH DSK block I/O ----
-; READBLK: AC2 -> drive, block, memory address.
-; Return AC0 = 1 on success, 5 on any DSK error (see kernel file).
-; Sector = drive * 1024 + block; full 256-word sector transferred.
-READBLK:STA AC3, RDBRET
-        LDA AC0, 1,AC2
-        LDA AC1, 0,AC2
-        MOV AC1, AC1, SNR
-        JMP RDBSEC
-        LDA AC1, DSKOFF
-        ADD AC1, AC0
-RDBSEC: DOA AC0, DSK
-        LDA AC0, 2,AC2
-        DOB AC0, DSK
-        NIOS AC0, DSK
-RDBWAIT:SKPDN DSK
-        JMP RDBWAIT
-        DIA AC0, DSK
-        MOV AC0, AC0, SNR
-        JMP RDBOK
-        LDA AC0, FIVE
-        JMP @RDBRET
-RDBOK:  LDA AC0, ONE
-        JMP @RDBRET
 
 HELLO:   DW 0o015, 0o012
          .TXT "cvit/Nova COMMAND V0.1"
