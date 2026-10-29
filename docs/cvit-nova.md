@@ -99,7 +99,11 @@ requires a contiguous page-zero region starting at `0o0050` and a code
 region starting at the load address (typically `0o3000`).
 
 Output is a flat binary: `[n1][n1 words][code words...]` where `n1` is the
-page-zero word count. The image maker (`scripts/mk_cvit_nova.py`) accepts:
+page-zero word count. `abs2bin.py` rebases page-zero pointer cells that
+reference the member's own code by `+(1+n1)`, accounting for the `[n1]`
+prefix shifting the code (assumes directory load address equals the
+assembly load address; `--load` overrides). The image maker
+(`scripts/mk_cvit_nova.py`) accepts:
 
 ```sh
 scripts/mk_cvit_nova.py out.img COMMAND=command.bin@3000,3105 README.md=README.md
