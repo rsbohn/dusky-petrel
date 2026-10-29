@@ -60,11 +60,11 @@ AC0 = selector on entry:
 
 | Selector | Service | Inputs |
 | --- | --- | --- |
-| 1 | putc | AC0 = char (on entry, selector overwritten) |
+| 1 | putc | AC1 = CB pointer; character at `[AC1+0]` |
 | 2 | getc | Returns char in AC0 |
-| 3 | puts | AC2 = string pointer |
-| 4 | read block | AC2 = control block |
-| 5 | write block | AC2 = control block |
+| 3 | puts | AC1 = string pointer (NUL-terminated) |
+| 4 | read block | AC1 = CB pointer (drive, block, mem) |
+| 5 | write block | AC1 = CB pointer (drive, block, mem) |
 
 Returns AC0 = 0 on success, nonzero on error (except getc, which returns
 the character).
@@ -78,6 +78,9 @@ the character).
 3. **Load**: For the matching entry, reads `block count` blocks starting
    at `start block` into the `load address` (128 payload words per block).
    The COMMAND member is a flat word image: `[n1][n1 page-zero words][code...]`.
+   Note: on SIMH, each block read transfers 256 words (not 128), so the
+   loader writes 128 words of zero padding after the image
+   (`[load+count*128, load+count*128+128)`). This region must be scratch.
 4. **Transfer**: Jumps to the `entry address` from the directory, which is
    `load + 1 + n1` — the prologue that copies the page-zero words to
    `0o0050` before running.
