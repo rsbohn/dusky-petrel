@@ -9,6 +9,7 @@
 ; Commands:
 ;   CAT    read TC0 block 1 into 0o7600 and list flat directory names
 ;   STA    read TC0 block 0 and report volume status
+;   TYPE   print file contents (TYPE <name>)
 ;   EOT    return to the kernel, which halts
 
 ; Keep mutable cells and constants on page zero so code at 0o3000 can reach them.
@@ -467,6 +468,7 @@ TYCLP:  LDA AC2, TYPTR
         MOV AC0, AC0, SZR
         JMP TYCNOM
         LDA AC0, TYTMP
+        MOVS AC0, AC0
         LDA AC1, BYTEMASK
         AND AC1, AC0
         LDA AC2, TYDPTR

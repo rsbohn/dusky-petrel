@@ -468,6 +468,7 @@ TYCLP:  LDA AC2, TYPTR
         MOV AC0, AC0, SZR
         JMP TYCNOM
         LDA AC0, TYTMP
+        MOVS AC0, AC0
         LDA AC1, BYTEMASK
         AND AC1, AC0
         LDA AC2, TYDPTR
