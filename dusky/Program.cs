@@ -76,7 +76,7 @@ if (consoleMode)
 {
     var attach = monitor.ExecuteCommandLine($"tc0 attach {consoleImage}", allowExit: false);
     Console.Write(attach);
-    var assemble = monitor.ExecuteCommandLine("asm sd/cvit-command.asm", allowExit: false);
+    var assemble = monitor.ExecuteCommandLine("asm sd/cvit-kernel.asm 0o1000", allowExit: false);
     Console.Write(assemble);
     if (!assemble.StartsWith("Assembled ", StringComparison.Ordinal))
     {
@@ -84,7 +84,7 @@ if (consoleMode)
         return 1;
     }
 
-    cpu.SetProgramCounter(0x600); // 0o3000
+    cpu.SetProgramCounter(0x200); // 0o1000: kernel cold start loads COMMAND from TC0
     Console.WriteLine("CVIT console active. Enter sends CR; Ctrl+D sends EOT to halt.");
     var runner = Task.Run(() =>
     {
