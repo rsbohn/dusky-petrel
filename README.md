@@ -44,6 +44,15 @@ Numbers default to octal; use `0x` for hex.
 
 Blocks are 129 words (128 data + 1 spare). Drives are `TC0` and `TC1`.
 
+### SIMH-style DSK
+
+The block controller at `0o20` also accepts raw DSK images, with 1024 sectors
+of 256 little-endian 16-bit words per drive. Attach a DSK image with
+`dsk0 attach <path>` or `dsk1 attach <path>`; use `[new]` to create a blank
+image, and `dsk status` to inspect the units. When a DSK image is attached to
+a unit, it takes precedence over TC08 media on that unit. This format is
+compatible with `convert-tc08-to-dsk.py` output and the SIMH CVIT image.
+
 ## Emulator Notes
 
 - Memory: 32K words, 15-bit addresses, 16-bit words.

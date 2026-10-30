@@ -14,6 +14,7 @@ public sealed class NovaTc08Device : INovaIoDevice
 
     private readonly NovaCpu _cpu;
     private readonly Tc08 _tc08;
+    private readonly DskImage? _dsk;
 
     private ushort _transferAddress;
     private ushort _block;
@@ -22,10 +23,11 @@ public sealed class NovaTc08Device : INovaIoDevice
     private bool _done;
     private bool _error;
 
-    public NovaTc08Device(NovaCpu cpu, Tc08 tc08, int deviceCode = DefaultDeviceCode)
+    public NovaTc08Device(NovaCpu cpu, Tc08 tc08, int deviceCode = DefaultDeviceCode, DskImage? dsk = null)
     {
         _cpu = cpu;
         _tc08 = tc08;
+        _dsk = dsk;
         DeviceCode = deviceCode & 0x3F;
     }
 
@@ -138,34 +140,30 @@ public sealed class NovaTc08Device : INovaIoDevice
             return;
         }
 
-        Span<ushort> buffer = stackalloc ushort[Tc08.WordsPerBlock];
+        var useDsk = _dsk?.GetPath(drive) is not null;
+        var wordCount = useDsk ? DskImage.WordsPerSector : Tc08.WordsPerBlock;
+        Span<ushort> buffer = stackalloc ushort[DskImage.WordsPerSector];
         if (read)
         {
-            if (_tc08.TryReadBlock(drive, _block, buffer, out _))
+            var success = useDsk
+                ? _dsk!.TryReadSector(drive, _block, buffer, out _)
+                : _tc08.TryReadBlock(drive, _block, buffer, out _);
+            if (success)
             {
-                for (var i = 0; i < Tc08.WordsPerBlock; i++)
-                {
-                    var addr = (ushort)(_transferAddress + i);
-                    _cpu.WriteMemory(addr, buffer[i]);
-                }
+                for (var i = 0; i < wordCount; i++)
+                    _cpu.WriteMemory((ushort)(_transferAddress + i), buffer[i]);
             }
-            else
-            {
-                _error = true;
-            }
+            else _error = true;
         }
         else
         {
-            for (var i = 0; i < Tc08.WordsPerBlock; i++)
-            {
-                var addr = (ushort)(_transferAddress + i);
-                buffer[i] = _cpu.ReadMemory(addr);
-            }
+            for (var i = 0; i < wordCount; i++)
+                buffer[i] = _cpu.ReadMemory((ushort)(_transferAddress + i));
 
-            if (!_tc08.TryWriteBlock(drive, _block, buffer, out _))
-            {
-                _error = true;
-            }
+            var success = useDsk
+                ? _dsk!.TryWriteSector(drive, _block, buffer, out _)
+                : _tc08.TryWriteBlock(drive, _block, buffer, out _);
+            if (!success) _error = true;
         }
 
         _busy = false;

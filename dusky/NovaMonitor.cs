@@ -18,6 +18,7 @@ public class NovaMonitor
     private readonly NovaConsoleTty? _tty;
     private readonly NovaWatchdogDevice? _watchdog;
     private readonly Tc08? _tc08;
+    private readonly DskImage? _dsk;
     private readonly NovaRtcDevice? _rtc;
     private readonly NovaPaperTape? _paperTape;
     private readonly NovaLinePrinterDevice? _linePrinter;
@@ -47,12 +48,14 @@ public class NovaMonitor
         NovaPaperTape? paperTape = null,
         NovaLinePrinterDevice? linePrinter = null,
         NovaWebDevice? web = null,
-        NovaJsonDevice? json = null)
+        NovaJsonDevice? json = null,
+        DskImage? dsk = null)
     {
         _cpu = cpu;
         _tty = tty;
         _watchdog = watchdog;
         _tc08 = tc08;
+        _dsk = dsk;
         _rtc = rtc;
         _paperTape = paperTape;
         _linePrinter = linePrinter;
@@ -554,6 +557,36 @@ public class NovaMonitor
         }
 
         Console.WriteLine("Usage: tc status");
+    }
+
+    private void HandleDsk(string[] args)
+    {
+        if (_dsk is null) { Console.WriteLine("DSK not configured."); return; }
+        if (args.Length != 1 || !args[0].Equals("status", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine("Usage: dsk status");
+            return;
+        }
+        for (var unit = 0; unit < DskImage.DriveCount; unit++)
+        {
+            var path = _dsk.GetPath(unit);
+            Console.WriteLine($"DSK{unit}: {(path is null ? "no media" : $"attached - {path}")}");
+        }
+    }
+
+    private void HandleDskUnit(int unit, string[] args)
+    {
+        if (_dsk is null) { Console.WriteLine("DSK not configured."); return; }
+        if (args.Length < 2 || !args[0].Equals("attach", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine($"Usage: dsk{unit} attach <path> [new]");
+            return;
+        }
+        var create = args.Length > 2 && args[2].Equals("new", StringComparison.OrdinalIgnoreCase);
+        if (_dsk.Attach(unit, args[1], create, out var error))
+            Console.WriteLine($"DSK{unit}: attached {args[1]}");
+        else
+            Console.WriteLine($"DSK{unit}: attach failed - {error}");
     }
 
     private void HandleTcUnit(int unit, string[] args)
@@ -1739,6 +1772,9 @@ LIMIT:  DW 0
             ["tc"] = "tc status            Show TC08 drive status",
             ["tc0"] = "tc0 <cmd> ...        TC08 unit 0 (attach/read/write/verify/index)",
             ["tc1"] = "tc1 <cmd> ...        TC08 unit 1 (attach/read/write/verify/index)",
+            ["dsk"] = "dsk status           Show DSK drive status",
+            ["dsk0"] = "dsk0 attach <path>   Attach 256-word-sector DSK image to unit 0",
+            ["dsk1"] = "dsk1 attach <path>   Attach 256-word-sector DSK image to unit 1",
             ["break"] = "break <addr>         Toggle breakpoint",
             ["breaks"] = "breaks              List breakpoints",
             ["dis"] = "dis <addr> [n]       Disassemble n words from addr",
@@ -1837,6 +1873,8 @@ LIMIT:  DW 0
         Console.WriteLine("  - tc status         Show TC08 drive status");
         Console.WriteLine("  - tc0 <cmd> ...     TC08 unit 0 (attach/read/write/verify/index)");
         Console.WriteLine("  - tc1 <cmd> ...     TC08 unit 1 (attach/read/write/verify/index)");
+        Console.WriteLine("  - dsk status        Show raw DSK drive status");
+        Console.WriteLine("  - dsk0/dsk1 attach <path> [new]  Attach 1024x256-word raw DSK media");
         Console.WriteLine("  - rtc status        Show RTC status");
         Console.WriteLine("  - web <cmd> ...     WEB helper (open/print/status)");
         Console.WriteLine("  - jsp status        Show JSP status");
@@ -1878,6 +1916,9 @@ LIMIT:  DW 0
             ["tc"] = stream => HandleTc(CollectRemainingArgs(stream)),
             ["tc0"] = stream => HandleTcUnit(0, CollectRemainingArgs(stream)),
             ["tc1"] = stream => HandleTcUnit(1, CollectRemainingArgs(stream)),
+            ["dsk"] = stream => HandleDsk(CollectRemainingArgs(stream)),
+            ["dsk0"] = stream => HandleDskUnit(0, CollectRemainingArgs(stream)),
+            ["dsk1"] = stream => HandleDskUnit(1, CollectRemainingArgs(stream)),
             ["rtc"] = stream => HandleRtc(CollectRemainingArgs(stream)),
             ["devices"] = _ => ShowDevices(),
             ["devs"] = _ => ShowDevices(),
@@ -2182,7 +2223,7 @@ LIMIT:  DW 0
                 NovaWebDevice => "WEB (http/https)",
                 NovaJsonDevice => "JSP (json parser)",
                 NovaWatchdogDevice => "WDT watchdog",
-                NovaTc08Device => "TC08 tape",
+                NovaTc08Device => "TC08/DSK block storage (device 0o20)",
                 NovaRtcDevice => "RTC clock",
                 _ => device.GetType().Name
             }

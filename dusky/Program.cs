@@ -18,7 +18,8 @@ var web = new NovaWebDevice();
 var json = new NovaJsonDevice(web);
 var watchdog = new NovaWatchdogDevice(cpu);
 var tc08 = new Tc08();
-var tc08Device = new NovaTc08Device(cpu, tc08);
+var dsk = new DskImage();
+var tc08Device = new NovaTc08Device(cpu, tc08, dsk: dsk);
 var rtc = new NovaRtcDevice();
 cpu.RegisterDevice(tty.InputDevice);
 cpu.RegisterDevice(tty.OutputDevice);
@@ -40,7 +41,7 @@ Console.CancelKeyPress += (_, e) =>
     Console.WriteLine("Break: CPU halted.");
 };
 
-var monitor = new NovaMonitor(cpu, tty, watchdog, tc08, rtc, paperTape, linePrinter, web, json);
+var monitor = new NovaMonitor(cpu, tty, watchdog, tc08, rtc, paperTape, linePrinter, web, json, dsk);
 NovaUnixConsole? unixConsole = null;
 var unixConsolePath = Environment.GetEnvironmentVariable("SNOVA_UNIX_CONSOLE");
 if (!string.IsNullOrWhiteSpace(unixConsolePath))
