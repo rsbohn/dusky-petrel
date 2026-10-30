@@ -1,6 +1,14 @@
 using Snova;
 
-if (args.Length > 0)
+var consoleMode = args.Length > 0 && args[0] == "--console";
+var consoleImage = consoleMode && args.Length > 1 ? args[1] : null;
+if (consoleMode && consoleImage is null)
+{
+    Console.Error.WriteLine("Usage: Snova --console <tc08-image>");
+    return 2;
+}
+
+if (args.Length > 0 && !consoleMode)
 {
     var exitCode = AbsoluteTapeTool.Run(args);
     if (exitCode != AbsoluteTapeTool.NotHandled)
@@ -64,5 +72,49 @@ if (!string.IsNullOrWhiteSpace(unixConsolePath))
     }
 }
 
-monitor.Run();
+if (consoleMode)
+{
+    var attach = monitor.ExecuteCommandLine($"tc0 attach {consoleImage}", allowExit: false);
+    Console.Write(attach);
+    var assemble = monitor.ExecuteCommandLine("asm sd/cvit-command.asm", allowExit: false);
+    Console.Write(assemble);
+    if (!assemble.StartsWith("Assembled ", StringComparison.Ordinal))
+    {
+        unixConsole?.Dispose();
+        return 1;
+    }
+
+    cpu.SetProgramCounter(0x600); // 0o3000
+    Console.WriteLine("CVIT console active. Enter sends CR; Ctrl+D sends EOT to halt.");
+    var runner = Task.Run(() =>
+    {
+        while (!cpu.Halted)
+            cpu.Step();
+    });
+    while (!cpu.Halted)
+    {
+        if (Console.KeyAvailable)
+        {
+            var key = Console.ReadKey(intercept: true);
+            if (key.Key == ConsoleKey.Enter)
+                tty.EnqueueInputBytes(new byte[] { 0x0D });
+            else if (key.Key == ConsoleKey.D && key.Modifiers.HasFlag(ConsoleModifiers.Control))
+                tty.EnqueueInputBytes(new byte[] { 0x04 });
+            else if (key.Key == ConsoleKey.C && key.Modifiers.HasFlag(ConsoleModifiers.Control))
+                cpu.Halt("Break");
+            else if (!char.IsControl(key.KeyChar))
+                tty.EnqueueInputBytes(System.Text.Encoding.ASCII.GetBytes(key.KeyChar.ToString()));
+        }
+        else
+        {
+            Thread.Sleep(10);
+        }
+    }
+    await runner;
+}
+else
+{
+    monitor.Run();
+}
 unixConsole?.Dispose();
+return 0;
