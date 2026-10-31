@@ -2,14 +2,18 @@
 
 `cvit/Nova` is the DG Nova personality inspired by the Hawk/Disk6 `cvit` system.
 It keeps the same user feel (`]CAT`, `]TYPE`, `]RUN`) but uses native Nova
-words and TC08 block storage.
+words and DSK sector storage. DSK is the preferred media: Dusky and SIMH
+run the same image files.
 
 ## Native assumptions
 
 - Memory is 32K 16-bit words.
-- TC08 device code is `0o20` (`DSK` in the assembler symbols).
-- A TC08 physical block is 129 words; cvit/Nova uses the first 128 words as data.
-- Drive names map to TC08 units: `TC0:` and `TC1:`.
+- DSK device code is `0o20` (`DSK` in the assembler symbols). Duskysn implements SIMHs DSK protocol (`nova_dsk.c`), so the
+  same image boots on both emulators.
+- A DSK sector is 256 words; cvit/Nova uses the first 128 words as
+  filesystem payload (one historical TC08 block per sector).
+- Drive names map to disk units: `TC0:` and `TC1:`
+  (`sector = drive * 1024 + block`).
 
 ## Initial memory layout
 
@@ -112,7 +116,7 @@ scripts/mk_cvit_nova.py out.img COMMAND=command.bin@3000,3105 README.md=README.m
 The `@load,entry` suffix sets the directory load address and entry address.
 Entry must equal `load + 1 + n1` (computed by `abs2bin.py`).
 
-## TC08 block control block
+## DSK sector control block
 
 For direct `read_block` / `write_block`, `AC2` points to:
 
@@ -122,10 +126,8 @@ For direct `read_block` / `write_block`, `AC2` points to:
 | `+1` | block number |
 | `+2` | memory address |
 
-The first implementation transfers a full TC08 block through the emulator device.
-Only the first 128 words are filesystem payload; word 128 is reserved/ignored.
-
-On SIMH, one TC08 block maps to one 256-word DSK sector:
+The device transfers a full 256-word DSK sector. Only the first 128 words
+are filesystem payload (a historical TC08 block); the rest is ignored.
 `sector = drive * 1024 + block`. The sector buffer must have 256 words of
 headroom, though only the first 128 hold filesystem data.
 
@@ -153,6 +155,17 @@ attach dsk cvit-dsk.img
 load kernel.abs
 go 1000
 ```
+
+Dusky smoke test (same image file):
+
+```text
+dsk0 attach cvit-dsk.img
+asm simh/cvit-kernel-simh.asm 0o1000
+go 1000
+```
+
+Or: `Snova --console cvit-dsk.img` (attaches DSK0, assembles the kernel,
+starts at `0o1000`).
 
 Expected: kernel banner, COMMAND auto-loads from disk, `]` prompt.
 `STA` → `TC0: CVNV READY`; `CAT` → lists directory names;

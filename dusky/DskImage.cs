@@ -71,7 +71,9 @@ public sealed class DskImage
     {
         path = ValidDrive(drive) ? _paths[drive] : null;
         if (path is null) { error = "DSK drive not attached."; return false; }
-        if (sector < 0 || sector >= SectorsPerDrive) { error = "Invalid DSK sector."; return false; }
+        // Capacity follows the file size (SIMH autosize): not capped at SectorsPerDrive.
+        var sectors = (int)(new FileInfo(path).Length / BytesPerSector);
+        if (sector < 0 || sector >= sectors) { error = "Invalid DSK sector."; return false; }
         if (wordCount < WordsPerSector) { error = "Buffer too small."; return false; }
         error = null;
         return true;

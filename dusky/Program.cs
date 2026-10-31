@@ -4,7 +4,7 @@ var consoleMode = args.Length > 0 && args[0] == "--console";
 var consoleImage = consoleMode && args.Length > 1 ? args[1] : null;
 if (consoleMode && consoleImage is null)
 {
-    Console.Error.WriteLine("Usage: Snova --console <tc08-image>");
+    Console.Error.WriteLine("Usage: Snova --console <dsk-image>");
     return 2;
 }
 
@@ -27,7 +27,7 @@ var json = new NovaJsonDevice(web);
 var watchdog = new NovaWatchdogDevice(cpu);
 var tc08 = new Tc08();
 var dsk = new DskImage();
-var tc08Device = new NovaTc08Device(cpu, tc08, dsk: dsk);
+var dskDevice = new NovaDskDevice(cpu, dsk);
 var rtc = new NovaRtcDevice();
 cpu.RegisterDevice(tty.InputDevice);
 cpu.RegisterDevice(tty.OutputDevice);
@@ -38,7 +38,7 @@ cpu.RegisterDevice(unicodeTto);
 cpu.RegisterDevice(web);
 cpu.RegisterDevice(json);
 cpu.RegisterDevice(watchdog);
-cpu.RegisterDevice(tc08Device);
+cpu.RegisterDevice(dskDevice);
 cpu.RegisterDevice(rtc);
 
 Console.CancelKeyPress += (_, e) =>
@@ -74,9 +74,9 @@ if (!string.IsNullOrWhiteSpace(unixConsolePath))
 
 if (consoleMode)
 {
-    var attach = monitor.ExecuteCommandLine($"tc0 attach {consoleImage}", allowExit: false);
+    var attach = monitor.ExecuteCommandLine($"dsk0 attach {consoleImage}", allowExit: false);
     Console.Write(attach);
-    var assemble = monitor.ExecuteCommandLine("asm sd/cvit-kernel.asm 0o1000", allowExit: false);
+    var assemble = monitor.ExecuteCommandLine("asm simh/cvit-kernel-simh.asm 0o1000", allowExit: false);
     Console.Write(assemble);
     if (!assemble.StartsWith("Assembled ", StringComparison.Ordinal))
     {
@@ -84,7 +84,7 @@ if (consoleMode)
         return 1;
     }
 
-    cpu.SetProgramCounter(0x200); // 0o1000: kernel cold start loads COMMAND from TC0
+    cpu.SetProgramCounter(0x200); // 0o1000: kernel cold start loads COMMAND from the DSK
     Console.WriteLine("CVIT console active. Enter sends CR; Ctrl+D sends EOT to halt.");
     var runner = Task.Run(() =>
     {
