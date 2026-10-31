@@ -51,7 +51,7 @@
         in
         {
           default = pkgs.mkShell {
-            packages = [ pkgs.dotnetCorePackages.sdk_9_0 ];
+            packages = [ pkgs.dotnetCorePackages.sdk_9_0 pkgs.gh ];
           };
         });
     };
