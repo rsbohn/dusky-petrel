@@ -43,7 +43,7 @@ def pack_name(name: str) -> list[int]:
 
 def read_member_words(path: Path) -> tuple[int, list[int]]:
     data = path.read_bytes()
-    if path.suffix.lower() in {".txt", ".text"}:
+    if path.suffix.lower() in {".txt", ".text", ".md"}:
         return TYPE_TXT, [b for b in data]
 
     if len(data) % 2:

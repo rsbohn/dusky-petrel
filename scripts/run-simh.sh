@@ -22,11 +22,13 @@ fi
 dotnet "$SNOVA" abs simh/cvit-kernel-simh.asm "$TMPDIR/kernel.abs" --format simh-load
 dotnet "$SNOVA" abs simh/cvit-command-simh.asm "$TMPDIR/command.abs" --format simh-load --start 3000
 python3 scripts/abs2bin.py "$TMPDIR/command.abs" "$TMPDIR/command.bin"
+printf 'Hello from CVIT/Nova!\nThis is a sample text file.\n' > "$TMPDIR/hello.txt"
 N1=$(python3 -c "import struct; print(struct.unpack_from('<H', open('$TMPDIR/command.bin','rb').read())[0])")
 ENTRY=$(printf '0o%o' $(( 8#3000 + 1 + N1 )))
 python3 scripts/mk_cvit_nova.py "$TMPDIR/cvit-tc08.img" \
     "COMMAND=$TMPDIR/command.bin@0o3000,$ENTRY" \
-    README.md=README.md
+    README.md=README.md \
+    "HELLO=$TMPDIR/hello.txt"
 python3 simh/convert-tc08-to-dsk.py "$TMPDIR/cvit-tc08.img" "$TMPDIR/cvit-dsk.img"
 
 cat > "$TMPDIR/simh.ini" <<EOF

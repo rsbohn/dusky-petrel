@@ -542,7 +542,19 @@ TYOTXT: LDA AC0, TYCNT
         LDA AC0, 0,AC2
         LDA AC1, BYTEMASK
         AND AC1, AC0
+        STA AC0, TYTMP
+        LDA AC1, LF
+        SUBZ AC1, AC0
+        MOV AC0, AC0, SNR
+        JMP TYOTLF
+        LDA AC0, TYTMP
         JSR @KPUTCP
+        JMP TYOTNEXT
+TYOTLF: LDA AC0, CR
+        JSR @KPUTCP
+        LDA AC0, TYTMP
+        JSR @KPUTCP
+TYOTNEXT:
         LDA AC2, TYPTR
         LDA AC0, ONE
         ADD AC0, AC2
