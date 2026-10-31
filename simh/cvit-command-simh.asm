@@ -505,7 +505,7 @@ TYOUT:  STA AC3, TYRETP
         LDA AC0, TYTYPE
         LDA AC1, ONE
         SUB AC1, AC0
-        MOV AC0, AC0, SZR
+        MOV AC0, AC0, SNR
         JMP TYOTXT
         ; Binary: 2 chars per word
 TYOBIN: LDA AC0, TYCNT
