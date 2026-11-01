@@ -384,7 +384,8 @@ public class NovaCpu
                 updatesCarry = true;
                 break;
             case 5: // SUB
-                (result, carryOut) = SubtractWithBorrow(dstValue, srcValue, carryIn);
+                // Nova SUB does not use carry as borrow (unlike SBC)
+                (result, carryOut) = SubtractWithBorrow(dstValue, srcValue, false);
                 updatesCarry = true;
                 break;
             case 6: // ADD
