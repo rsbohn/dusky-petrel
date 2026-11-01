@@ -7,6 +7,13 @@ if (consoleMode && consoleImage is null)
     Console.Error.WriteLine("Usage: Snova --console <dsk-image>");
     return 2;
 }
+var batchMode = args.Length > 0 && args[0] == "--batch";
+var batchImage = batchMode && args.Length > 1 ? args[1] : null;
+if (batchMode && batchImage is null)
+{
+    Console.Error.WriteLine("Usage: Snova --batch <dsk-image> < input");
+    return 2;
+}
 
 if (args.Length > 0 && !consoleMode)
 {
@@ -111,6 +118,35 @@ if (consoleMode)
         }
     }
     await runner;
+}
+else if (batchMode)
+{
+    var attachB = monitor.ExecuteCommandLine($"dsk0 attach {batchImage}", allowExit: false);
+    var assembleB = monitor.ExecuteCommandLine($"asm /Users/rsbohn/build/dusky-petrel/simh/cvit-kernel-simh.asm 0o1000", allowExit: false);
+    if (!assembleB.StartsWith("Assembled ", StringComparison.Ordinal))
+    {
+        Console.Error.WriteLine($"Assemble failed: {assembleB}");
+        unixConsole?.Dispose();
+        return 1;
+    }
+    using var stdin = Console.OpenStandardInput();
+    using var ms = new MemoryStream();
+    stdin.CopyTo(ms);
+    tty.EnqueueInputBytes(ms.ToArray());
+    var realOut = Console.Out;
+    var capture = new StringWriter();
+    Console.SetOut(capture);
+    cpu.SetProgramCounter(0x200);
+    var maxSteps = 10000000;
+    var steps = 0;
+    while (!cpu.Halted && steps < maxSteps)
+    {
+        cpu.Step();
+        steps++;
+    }
+    Console.SetOut(realOut);
+    Console.Write(capture.ToString());
+    if (steps >= maxSteps) { Console.Error.WriteLine("Batch: timeout"); return 1; }
 }
 else
 {

@@ -60,7 +60,7 @@ assert_output() {
     echo "PASS: $expected"
 }
 
-assert_output 'TC0: CVNV READY'
+assert_output 'DSK0: CVNV READY'
 assert_output 'COMMAND'
 assert_output 'README'
 assert_output 'HELLO'

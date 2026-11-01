@@ -8,7 +8,9 @@
 ;
 ; Commands:
 ;   CAT    read TC0 block 1 into 0o7600 and list flat directory names
-;   STA    read TC0 block 0 and report volume status
+;   STA    read SYS block 0 and report volume status
+;   SYS:   alias for the boot media (DSK0 on SIMH)
+;   File spec (future): VOLUME:LIBRARY/MEMBER
 ;   TYPE   print file contents (TYPE <name>)
 ;   EOT    return to the kernel, which halts
 
@@ -443,7 +445,7 @@ PTPLP:  LDA AC2, TYPTR
         MOV AC0, AC1
         LDA AC0, HIMASK
         AND AC0, AC1
-        MOV AC1, AC1, SNR
+        MOV AC1, AC1, SZR
         JMP PTPNO1
         LDA AC0, TYTMP
         LDA AC1, HIZ
@@ -451,7 +453,7 @@ PTPLP:  LDA AC2, TYPTR
         MOV AC1, AC1
         LDA AC0, HIMASK
         AND AC0, AC1
-        MOV AC1, AC1, SNR
+        MOV AC1, AC1, SZR
         JMP PTPNO1
         LDA AC0, TYTMP
         LDA AC1, TOUPPER
@@ -688,9 +690,9 @@ DSKERR:  DW 0o077
 VOLERR:  DW 0o077
          .TXT "VOL"
          DW 0o015, 0o012, 0
-CATHEAD: .TXT "TC0:"
+CATHEAD: .TXT "DSK0:"
          DW 0o015, 0o012, 0
-STAMSG:  .TXT "TC0: CVNV READY"
+STAMSG:  .TXT "DSK0: CVNV READY"
          DW 0o015, 0o012, 0
 NL:      DW 0o015, 0o012, 0
 NOTFOUND:DW 0o077
