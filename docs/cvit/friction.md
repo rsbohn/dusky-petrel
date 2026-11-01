@@ -64,3 +64,27 @@ assemble, both look right, and only a live test tells them apart. When
 writing a skip-branch, annotate the intended mapping in a comment (e.g.
 `; type==TXT -> TYOTXT`) and exercise both sides of the branch on the
 hardware (or SIMH) before moving on.
+
+## 2026-10-31 — PTYP's uppercase never ran (third SZR/SNR inversion)
+
+**Symptom.** Making COMMAND case-insensitive exposed it: the uppercase
+block in PTYP (which uppercases `TYPE` filenames) could never execute.
+Lowercase filenames silently failed to match.
+
+**The hunt.** The HIMASK range check used `SNR` where it needed `SZR`:
+with `SNR`, a lowercase char like 'm' (`char-'a'` positive, sign bit
+clear, masked to 0) does *not* skip, so the "not lowercase" jump is taken
+and the uppercase never happens. The guard only falls through when
+`char < 'a'` — exactly backwards. For the uppercase to run, `char` would
+have to be both `< 'a'` and `> 'z'`: impossible. Dead code since written;
+invisible because everyone typed uppercase names.
+
+**Fix.** `SNR` → `SZR` in both guards, in PTYP and in the new UPVERB
+(which had copied the bug verbatim). Now `AC1 == 0` means `char >= 'a'`,
+skip the jump, continue; `AC1 != 0` means `char < 'a'`, take the jump.
+
+**Lesson.** Third inverted skip in COMMAND in two days (TYNEXT/TYFOUND
+swap, TYOUT SZR/SNR, now PTYP SNR/SZR). The pattern is always the same:
+both directions assemble and the wrong one looks right. When a skip-guard
+is meant to *continue* on a condition, trace one in-range and one
+out-of-range value through it before moving on.

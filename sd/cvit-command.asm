@@ -106,7 +106,9 @@ HIMASK:  DW 0o100000
 BYTEMASK:DW 0o377
 TOUPPER: DW 0o40
 TWO:     DW 2
+FOUR:    DW 4
 PROMPTP: DW PROMPT
+UPVERBP: DW UPVERB
 
         ORG 0o3000
 
@@ -158,6 +160,9 @@ CHECK:  LDA AC2, LINEP
         LDA AC0, 0,AC2
         MOV AC0, AC0, SNR
         JMP PROMPT
+        JSR @UPVERBP
+        LDA AC2, LINEP
+        LDA AC0, 0,AC2
         LDA AC3, CHC
         SUBZ AC3, AC0
         MOV AC0, AC0, SNR
@@ -381,6 +386,41 @@ TYDONE: JMP @PROMPTP
 TYNOTF: LDA AC2, NOTFOUNDP
         JSR @KPUTSP
         JMP @PROMPTP
+
+; UPVERB: Uppercase LINE[0..3] in place for case-insensitive dispatch.
+UPVERB: STA AC3, UPVRET
+        LDA AC2, LINEP
+        LDA AC3, FOUR
+UPVLP:  LDA AC0, 0,AC2
+        STA AC0, UPTMP
+        LDA AC1, LOA
+        SUB AC1, AC0
+        MOV AC0, AC1
+        LDA AC0, HIMASK
+        AND AC0, AC1
+        MOV AC1, AC1, SZR
+        JMP UPVNO
+        LDA AC0, UPTMP
+        LDA AC1, HIZ
+        SUB AC0, AC1
+        MOV AC1, AC1
+        LDA AC0, HIMASK
+        AND AC0, AC1
+        MOV AC1, AC1, SZR
+        JMP UPVNO
+        LDA AC0, UPTMP
+        LDA AC1, TOUPPER
+        SUB AC1, AC0
+        STA AC0, 0,AC2
+UPVNO:  LDA AC0, ONE
+        ADD AC0, AC2
+        LDA AC0, NEG1
+        ADD AC0, AC3
+        MOV AC3, AC3, SNR
+        JMP @UPVRET
+        JMP UPVLP
+UPVRET: DW 0
+UPTMP:  DW 0
 
 ; PTYP: Parse LINE+5 into TYPENAME (10 chars, upper, space-pad).
 PTYP:   STA AC3, TYRETP
