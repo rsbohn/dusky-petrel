@@ -87,6 +87,7 @@ TEN:     DW 0o12
 TYPTR:   DW 0
 TYDPTR:  DW 0
 TYCNT:   DW 0
+TYBCNT:  DW 0
 TYTMP:   DW 0
 TYTYPE:  DW 0
 TYSTART: DW 0
@@ -106,6 +107,7 @@ LOA:     DW 0o141
 HIZ:     DW 0o172
 HIMASK:  DW 0o100000
 BYTEMASK:DW 0o377
+B128:    DW 0o200
 TOUPPER: DW 0o40
 TWO:     DW 2
 FOUR:    DW 4
@@ -351,7 +353,7 @@ TYFOUND:LDA AC2, ENTPTR
         STA AC0, TYSTART
         LDA AC0, 7,AC2
         STA AC0, TYCOUNT
-        LDA AC0, 10,AC2
+        LDA AC0, 12,AC2
         STA AC0, TYLEN
         LDA AC2, TYPECBP
         LDA AC0, ZERO
@@ -544,6 +546,8 @@ TYOUT:  STA AC3, TYRETP
         STA AC2, TYPTR
         LDA AC0, TYLEN
         STA AC0, TYCNT
+        LDA AC0, B128
+        STA AC0, TYBCNT
         LDA AC0, TYTYPE
         LDA AC1, ONE
         SUB AC1, AC0
@@ -551,6 +555,9 @@ TYOUT:  STA AC3, TYRETP
         JMP TYOTXT
         ; Binary: 2 chars per word
 TYOBIN: LDA AC0, TYCNT
+        MOV AC0, AC0, SNR
+        JMP @TYRETP
+        LDA AC0, TYBCNT
         MOV AC0, AC0, SNR
         JMP @TYRETP
         LDA AC2, TYPTR
@@ -572,12 +579,19 @@ TYOBIN: LDA AC0, TYCNT
         LDA AC1, NEG1
         ADD AC1, AC0
         STA AC0, TYCNT
+        LDA AC0, TYBCNT
+        LDA AC1, NEG1
+        ADD AC1, AC0
+        STA AC0, TYBCNT
         LDA AC0, TYLEN
         LDA AC1, NEG1
         ADD AC1, AC0
         STA AC0, TYLEN
         JMP TYOBIN
 TYOTXT: LDA AC0, TYCNT
+        MOV AC0, AC0, SNR
+        JMP @TYRETP
+        LDA AC0, TYBCNT
         MOV AC0, AC0, SNR
         JMP @TYRETP
         LDA AC2, TYPTR
@@ -605,6 +619,10 @@ TYOTNEXT:
         LDA AC1, NEG1
         ADD AC1, AC0
         STA AC0, TYCNT
+        LDA AC0, TYBCNT
+        LDA AC1, NEG1
+        ADD AC1, AC0
+        STA AC0, TYBCNT
         LDA AC0, TYLEN
         LDA AC1, NEG1
         ADD AC1, AC0
