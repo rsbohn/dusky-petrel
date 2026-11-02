@@ -23,7 +23,7 @@ N1=$(python3 -c "import struct; print(struct.unpack_from('<H', open('$TMPDIR/com
 ENTRY=$(printf '0o%o' $(( 8#3000 + 1 + N1 )))
 python3 scripts/mk_cvit_nova.py "$TMPDIR/cvit-tc08.img" \
     "COMMAND=$TMPDIR/command.bin@0o3000,$ENTRY" \
-    README.md=README.md "HELLO=$TMPDIR/hello.txt"
+    README.md=README.md "HELLO=$TMPDIR/hello.txt" "LINES64=testdata/lines64.txt"
 python3 simh/convert-tc08-to-dsk.py "$TMPDIR/cvit-tc08.img" "$TMPDIR/cvit-dsk.img"
 
 cat > "$TMPDIR/simh.ini" <<EOF
