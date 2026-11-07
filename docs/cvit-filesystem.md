@@ -90,13 +90,13 @@ The length field (offset 10 decimal / 12 octal) contains:
 |-------|------|-------------|
 | 1     | `TYPE_TXT` | Text file. Stored as one byte per 16-bit word. Suffixes: `.txt`, `.text`, `.md`. |
 | 2     | `TYPE_BIN` | Binary file. Stored as little-endian 16-bit words. |
-| 3     | `TYPE_SYS` | System file. Same storage as BIN. Suffixes: `.sys`, `.abs`. |
+| 3     | `TYPE_SYS` | Executable/system file. Stored as little-endian 16-bit words; `RUN` loads it at the directory load address and jumps to the entry address. Suffixes: `.sys`, `.abs`. |
 
 ### Default Addresses
 
 If not specified on the `mk_cvit_nova.py` command line:
 - `COMMAND` member: load address `0o3000`
-- All other members: load address `0o0200`
+- All other members: load address `0o0200` (override for executable members as needed)
 - Entry address defaults to load address if not specified.
 
 Specify explicit addresses as `NAME=path@load,entry` (octal by default,
@@ -133,7 +133,21 @@ The `COMMAND` member is a flat word image:
   prologue that copies page-zero words to `0o0050` before running.
 
 `scripts/abs2bin.py` converts the assembler output to this format,
-rebasing page-zero pointer values by the code offset.
+rebasing page-zero pointer values by the code offset. `scripts/abs2flat.py`
+flattens one contiguous absolute-image region for a raw `TYPE_SYS` member.
+`RUN` currently loads a SYS member's 128-word payload blocks at the directory
+load address and jumps to its entry address; it does not save CPU state or
+return to COMMAND after the program finishes. The `calendar` test member is
+assembled at `0o2000` and uses that as both load and entry address:
+
+```sh
+dotnet Snova.dll abs sd/calendar.asm /tmp/calendar.abs --format simh-load
+python3 scripts/abs2flat.py /tmp/calendar.abs /tmp/calendar.sys 0o2000
+# Include CALENDAR=/tmp/calendar.sys@0o2000,0o2000 when building the image.
+```
+
+`scripts/test-cvit-simh.sh` builds the image and exercises `RUN CALENDAR` on
+SIMH; the same image also runs in Dusky.
 
 ## References
 

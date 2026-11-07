@@ -169,19 +169,17 @@ starts at `0o1000`).
 
 Expected: kernel banner, COMMAND auto-loads from disk, `]` prompt.
 `STA` → `TC0: CVNV READY`; `CAT` → lists directory names;
-`TYPE <name>` → prints file contents; `FOO` → `?WHAT`; EOT → HALT.
+`TYPE <name>` → prints file contents; `RUN <name>` → loads a `TYPE_SYS`
+member at its directory load address and transfers to its entry address;
+`FOO` → `?WHAT`; EOT → HALT. A running program that halts ends the simulation;
+returning to the COMMAND prompt is not yet supported.
 
 ## Status
 
 - [x] Kernel jump table with GETC/PUTC/PUTS (vectors `0o1006`-`0o1010`)
 - [x] COMMAND uses kernel services; no duplicate device drivers
 - [x] Cold start loads COMMAND from disk; EOT returns to kernel HALT
-- [x] STA, CAT, and TYPE commands
-- [ ] RUN command (next)
-- [ ] Nova FOCAL with software floating point (after RUN)
-- [x] COMMAND uses kernel services; no duplicate device drivers
-- [x] Cold start loads COMMAND from disk; EOT returns to kernel HALT
-- [x] STA and CAT preserved
-- [ ] TYPE command (next)
-- [ ] RUN command (after TYPE)
-- [ ] Nova FOCAL with software floating point (after RUN)
+- [x] STA, CAT, TYPE, and RUN commands
+- [x] RUN loads `TYPE_SYS` members and transfers to their directory entry address
+- [ ] Return from a RUN program to the COMMAND prompt
+- [ ] Nova FOCAL with software floating point

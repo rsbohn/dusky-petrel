@@ -12,6 +12,7 @@
 ;   SYS:   alias for the boot media (DSK0 on SIMH)
 ;   File spec (future): VOLUME:LIBRARY/MEMBER
 ;   TYPE   print file contents (TYPE <name>)
+;   RUN    load and execute a SYS member (RUN <name>)
 ;   EOT    return to the kernel, which halts
 
 ; Keep mutable cells and constants on page zero so code at 0o3000 can reach them.
@@ -21,6 +22,7 @@ ZERO:    DW 0
 ONE:     DW 1
 NEG1:    DW 0o177777
 FIVE:    DW 5
+THREE:   DW 3
 NENTS:   DW 0o12
 ENTWORDS:DW 0o14
 
@@ -83,6 +85,9 @@ TYPENAME:DW 0,0,0,0,0,0,0,0,0,0
 CHY:     DW 0o131
 CHP:     DW 0o120
 CHE:     DW 0o105
+CHR:     DW 0o122
+CHU:     DW 0o125
+CHN:     DW 0o116
 TEN:     DW 0o12
 TYPTR:   DW 0
 TYDPTR:  DW 0
@@ -93,12 +98,23 @@ TYTYPE:  DW 0
 TYSTART: DW 0
 TYCOUNT: DW 0
 TYLEN:   DW 0
+TYPOS:   DW 0
+RUNFLAG: DW 0
+RUNBLK:  DW 0
+RUNCOUNT:DW 0
+RUNADDR: DW 0
+RUNENTRY:DW 0
+RUNCBP:  DW RUNCB
+RUNCB:   DW 0
+         DW 0
+         DW 0
 TYPECBP: DW TYPECB
 TYPECB:  DW 0
          DW 0
          DW 0o7600
 TYPENAMEP: DW TYPENAME
 NOTFOUNDP: DW NOTFOUND
+RUNTYPEP: DW RUNTYPMSG
 TYRETP:  DW 0
 PTYPP:   DW PTYP
 TYCMPP:  DW TYCMP
@@ -183,6 +199,26 @@ CHECK:  LDA AC2, LINEP
         SUBZ AC3, AC0
         MOV AC0, AC0, SNR
         JMP CHK_TY
+        LDA AC2, LINEP
+        LDA AC0, 0,AC2
+        LDA AC3, CHR
+        SUBZ AC3, AC0
+        MOV AC0, AC0, SNR
+        JMP CHK_RU
+        JMP BAD
+CHK_RU: LDA AC2, LINEP
+        LDA AC0, 1,AC2
+        LDA AC3, CHU
+        SUBZ AC3, AC0
+        MOV AC0, AC0, SNR
+        JMP CHK_RUN
+        JMP BAD
+CHK_RUN:LDA AC2, LINEP
+        LDA AC0, 2,AC2
+        LDA AC3, CHN
+        SUBZ AC3, AC0
+        MOV AC0, AC0, SNR
+        JMP DO_RUN
         JMP BAD
 CHK_TY: LDA AC2, LINEP
         LDA AC0, 1,AC2
@@ -272,7 +308,7 @@ CATLP:  LDA AC2, ENTPTR
         MOV AC3, AC3, SNR
         JMP CATDONE
         JMP CATLP
-CATDONE:JMP PROMPT
+CATDONE:JMP @PROMPTP
 
 DO_STA: LDA AC2, STACBP
         JSR @KRDBLKP
@@ -311,6 +347,18 @@ STA_OK: LDA AC2, STAMSGP
 ; finds matching directory entry, reads blocks and outputs as text.
 
 DO_TYPE:
+        LDA AC0, ZERO
+        STA AC0, RUNFLAG
+        LDA AC0, FIVE
+        STA AC0, TYPOS
+        JMP TY_LOOKUP
+
+DO_RUN:
+        LDA AC0, ONE
+        STA AC0, RUNFLAG
+        LDA AC0, FOUR
+        STA AC0, TYPOS
+TY_LOOKUP:
         JSR @PTYPP
         LDA AC2, RDBCBP
         JSR @KRDBLKP
@@ -355,6 +403,20 @@ TYFOUND:LDA AC2, ENTPTR
         STA AC0, TYCOUNT
         LDA AC0, 12,AC2
         STA AC0, TYLEN
+        LDA AC1, FOUR
+        ADD AC1, AC2
+        ADD AC1, AC2
+        LDA AC0, 0,AC2
+        STA AC0, RUNADDR
+        LDA AC1, ONE
+        ADD AC1, AC2
+        LDA AC0, 0,AC2
+        STA AC0, RUNENTRY
+        LDA AC0, RUNFLAG
+        MOV AC0, AC0, SNR
+        JMP TYTYPESET
+        JMP TYRUN
+TYTYPESET:
         LDA AC2, TYPECBP
         LDA AC0, ZERO
         STA AC0, 0,AC2
@@ -386,6 +448,57 @@ TYBOK:  JSR @TYOUTP
         STA AC0, TYCOUNT
         JMP TYBLP
 TYDONE: JMP @PROMPTP
+
+; RUN loads each 128-word filesystem payload block at the member load
+; address (DSK transfers may overwrite the following 128 padding words),
+; then jumps to the directory entry address. RUN members are raw SYS words.
+TYRUN:  LDA AC0, TYTYPE
+        LDA AC1, THREE
+        SUBZ AC1, AC0
+        MOV AC0, AC0, SNR
+        JMP TYRLOAD
+        LDA AC2, RUNTYPEP
+        JSR @KPUTSP
+        JMP @PROMPTP
+TYRLOAD:LDA AC0, TYSTART
+        STA AC0, RUNBLK
+        LDA AC0, TYCOUNT
+        STA AC0, RUNCOUNT
+        LDA AC0, RUNENTRY
+        STA AC0, RUNENTP
+TYRLP:  LDA AC0, RUNCOUNT
+        MOV AC0, AC0, SNR
+        JMP TYRGO
+        LDA AC2, RUNCBP
+        LDA AC0, ZERO
+        STA AC0, 0,AC2
+        LDA AC0, RUNBLK
+        STA AC0, 1,AC2
+        LDA AC0, RUNADDR
+        STA AC0, 2,AC2
+        JSR @KRDBLKP
+        LDA AC3, ONE
+        SUBZ AC3, AC0
+        MOV AC0, AC0, SNR
+        JMP TYROK
+        LDA AC2, DSKERRP
+        JSR @KPUTSP
+        JMP @PROMPTP
+TYROK:  LDA AC0, RUNBLK
+        LDA AC1, ONE
+        ADD AC1, AC0
+        STA AC0, RUNBLK
+        LDA AC0, RUNADDR
+        LDA AC1, B128
+        ADD AC1, AC0
+        STA AC0, RUNADDR
+        LDA AC0, RUNCOUNT
+        LDA AC1, NEG1
+        ADD AC1, AC0
+        STA AC0, RUNCOUNT
+        JMP TYRLP
+TYRGO:  JMP @RUNENTP
+RUNENTP: DW 0
 
 TYNOTF: LDA AC2, NOTFOUNDP
         JSR @KPUTSP
@@ -429,7 +542,7 @@ UPTMP:  DW 0
 ; PTYP: Parse LINE+5 into TYPENAME (10 chars, upper, space-pad).
 PTYP:   STA AC3, TYRETP
         LDA AC2, LINEP
-        LDA AC0, FIVE
+        LDA AC0, TYPOS
         ADD AC0, AC2
         STA AC2, TYPTR
         LDA AC2, TYPENAMEP
@@ -715,4 +828,7 @@ STAMSG:  .TXT "DSK0: CVNV READY"
 NL:      DW 0o015, 0o012, 0
 NOTFOUND:DW 0o077
          .TXT "NOFILE"
+         DW 0o015, 0o012, 0
+RUNTYPMSG: DW 0o077
+         .TXT "TYPE"
          DW 0o015, 0o012, 0
