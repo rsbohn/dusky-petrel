@@ -1,5 +1,10 @@
 ; FOCAL/Nova - a FOCAL interpreter for cvit/Nova
 ;
+; Copyright (c) 2026 Randall Bohn.  MIT License; see LICENSE.
+; An independent implementation of the FOCAL language, written from
+; scratch for cvit/Nova.  It contains no DEC code and is not affiliated
+; with or endorsed by Digital Equipment Corporation or its successors.
+;
 ; Runs as a CVIT RUN member: RUN FOCAL.  Built with
 ;   Snova abs sd/focal.asm focal.abs --format simh-load
 ;   scripts/abs2flat.py --pz focal.abs focal.sys 0o6000

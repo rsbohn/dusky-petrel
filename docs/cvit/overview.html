@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CVIT overview and Centurion CPU6 implementation guide</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 17px/1.6 system-ui, sans-serif; max-width: 1100px; margin: 2rem auto; padding: 0 1.2rem; }
+  h1, h2, h3 { line-height: 1.25; } h2 { margin-top: 2.5rem; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { border: 1px solid #888; padding: .5rem; text-align: left; vertical-align: top; }
+  code, pre { font-family: ui-monospace, monospace; }
+  pre { overflow-x: auto; padding: 1rem; background: light-dark(#f1f3f5, #20252b); }
+  .note { border-left: 4px solid #6799cc; padding: .6rem 1rem; background: light-dark(#eef5fc, #182635); }
+  nav a { margin-right: 1rem; }
+</style>
+</head>
+<body>
+<header>
+<h1>CVIT: system overview and CPU6 porting guide</h1>
+<p>A small, single-user, single-program environment: a resident kernel, a disk-loaded command interpreter, a flat filesystem, and loadable applications.</p>
+<p><strong>Baseline:</strong> Dusky/CVIT Nova sources as of November 8, 2026. <strong>Target:</strong> Centurion CPU6 with Hawk disk blocks of <strong>400 bytes</strong>.</p>
+<div class="note"><strong>Status distinction.</strong> Nova behavior below describes implemented code. The CPU6 ABI and Hawk mapping are a proposed implementation contract, not a claim that a CPU6 port already exists or a description of an existing Centurion disk format. Instruction encodings, controller registers, disk geometry, bootstrap entry, and CPU6 memory layout must be established from the target's hardware documentation.</div>
+<nav aria-label="Contents">
+<a href="#features">Features</a><a href="#hardware">Hardware</a><a href="#boot">Boot</a><a href="#abi">Kernel ABI</a><a href="#disk">Disk format</a><a href="#loading">Loading</a><a href="#shell">COMMAND</a><a href="#validation">Validation</a>
+</nav>
+</header>
+<main>
+<section id="features">
+<h2>1. Core features and ownership</h2>
+<table>
+<thead><tr><th>Layer</th><th>Responsibilities</th></tr></thead>
+<tbody>
+<tr><td>Resident kernel</td><td>Cold start; finding and loading COMMAND; warm start that reloads COMMAND; blocking console input; character and string output; raw block reads/writes; service dispatch; halt.</td></tr>
+<tr><td>COMMAND</td><td>The <code>]</code> prompt; command input and echo; case-insensitive verbs/member lookup; <code>STA</code>, <code>CAT</code>, <code>TYPE name</code>, <code>RUN name</code>; EOT exit.</td></tr>
+<tr><td>Filesystem</td><td>One volume header, one flat directory, contiguous file extents, ten-character member names, text/binary/system member types, explicit length/load/entry metadata.</td></tr>
+<tr><td>Applications</td><td>Use kernel I/O and return through warm start. Nova examples include a calendar and FOCAL with software floating point.</td></tr>
+<tr><td>Host tools</td><td>Assemble and package programs, calculate directory metadata, allocate contiguous extents, generate images. Runtime file creation is not required.</td></tr>
+</tbody>
+</table>
+<p><strong>Not part of the core:</strong> multitasking, processes, memory protection, dynamic allocation, hierarchical directories, file handles, runtime file creation/deletion, filesystem repair, or a scheduler. A block-write primitive does not imply a writable file API. FOCAL is an application, not a kernel service.</p>
+<p>The minimum useful CPU6 milestone is boot → COMMAND → STA/CAT/TYPE → RUN → warm return. A FOCAL port is a separate, larger application milestone; Nova machine code cannot run unchanged on CPU6.</p>
+</section>
+<section id="hardware">
+<h2>2. Hardware dependencies and isolation boundary</h2>
+<table>
+<thead><tr><th>Dependency</th><th>Nova reference</th><th>CPU6 requirement</th></tr></thead>
+<tbody>
+<tr><td>CPU and RAM</td><td>32K addressable 16-bit words; four accumulators; page-zero cells; Nova JSR links.</td><td>Native instruction implementation, a defined calling convention, scratch storage and software stack if needed. Reserve kernel and I/O memory from application loads. Neither Nova instructions nor its word addresses are portable.</td></tr>
+<tr><td>Console receive</td><td>TTI device <code>0o10</code>; poll ready, read with clear pulse (<code>DIAC</code>).</td><td>Poll a receiver or consume an interrupt-driven queue; return exactly one ASCII byte, acknowledging hardware status correctly.</td></tr>
+<tr><td>Console transmit</td><td>TTO device <code>0o11</code>; wait until available, transmit with start pulse (<code>DOAS</code>).</td><td>Wait for transmitter readiness, send one byte, and perform required status/handshake operations.</td></tr>
+<tr><td>Disk</td><td>DSK device <code>0o20</code>; sector/memory setup, read/write start, completion polling and status check.</td><td>Hawk driver that transfers exactly 400 bytes, translates a partition-relative block number into controller addressing, and reports errors.</td></tr>
+<tr><td>Bootstrap</td><td>Host assembles/loads the kernel at <code>0o1000</code>.</td><td>A monitor, ROM loader, or standalone bootstrap must place a CPU6 kernel in RAM and transfer control to cold start.</td></tr>
+<tr><td>Timing and interrupts</td><td>Core kernel polls devices; no scheduling timer required.</td><td>Polling is sufficient. Define interrupt masks, timeout mechanism, and ownership before enabling interrupts. RTC, watchdog, printer, paper tape, web and JSON devices are not core requirements.</td></tr>
+</tbody>
+</table>
+<h3>Required target facts before writing the driver</h3>
+<ul>
+<li>CPU6 register/call/return conventions, address units and width, byte order, interrupt behavior, and usable RAM map.</li>
+<li>Console register addresses or firmware calls, ready/error bits, acknowledgment sequence, and terminal configuration.</li>
+<li>Hawk controller command/status interface, unit selection, seek/read/write sequencing, completion/error bits, retry/reset procedure, and write protection.</li>
+<li>Whether 400 bytes are controller-visible data bytes excluding any controller-managed framing, ECC, or headers; any transfer alignment or DMA restrictions.</li>
+<li>Disk geometry and sector numbering, reserved tracks/blocks, and the exact CVIT partition base and length. Never assume a whole existing Hawk pack is available.</li>
+<li>Where the initial loader resides and how it locates the kernel. CVIT logical block 0 is a volume header, <em>not</em> executable bootstrap code.</li>
+</ul>
+<p>Keep these dependencies behind console and block-device routines. COMMAND and the filesystem should never manipulate controller registers directly.</p>
+</section>
+<section id="boot">
+<h2>3. Boot and warm-return sequence</h2>
+<h3>Implemented Dusky path</h3>
+<pre>scripts/run-dusky.sh
+  build Dusky; assemble/package COMMAND and FOCAL
+  make volume containing COMMAND, FOCAL, README.MD, HELLO
+  convert TC08 staging image to DSK image
+  start Snova --console image
+    attach DSK0
+    assemble simh/cvit-kernel-simh.asm at 0o1000
+    set PC = 0o1000
+      COLD: print kernel banner
+      LOADCMD: read directory block 1 into kernel directory buffer
+        find exact space-padded name COMMAND
+        read its contiguous payload blocks at the recorded load address
+        jump to recorded entry address
+      COMMAND: initialize workspace; print banner and ] prompt</pre>
+<p>The current loader uses fixed directory block 1 and ten entries; it does not discover arbitrary layouts from the header. It reports <code>?DSK</code> on disk failure or <code>?NOCMD</code> on a missing member, then halts. It does not comprehensively validate malicious or corrupt metadata.</p>
+<h3>CPU6 contract</h3>
+<ol>
+<li>External bootstrap loads the native kernel. Initialize kernel workspace, console and disk hardware to a known state; select the boot volume.</li>
+<li>Cold start prints a banner. Validate the volume header and bounds, read the directory, and locate COMMAND.</li>
+<li>Validate its type, extent, length, load range and entry point. Load its native image without overwriting resident state.</li>
+<li>Transfer control to COMMAND, which initializes all its mutable state and prompts.</li>
+<li><code>RUN</code> loads an application and jumps to it. The application exits by jumping to kernel warm start, not by returning through a saved COMMAND stack frame.</li>
+<li>Warm start restores the kernel's required execution state and reloads COMMAND from disk. It must not depend on COMMAND or application workspace surviving.</li>
+<li>EOT at the COMMAND prompt calls kernel quit. Define whether target quit halts or returns to the hardware monitor.</li>
+</ol>
+<p>Warm start is a destructive restart of the shell, not a process context switch. Application data is not preserved automatically.</p>
+</section>
+<section id="abi">
+<h2>4. Kernel service interface</h2>
+<p>The portable requirement is the service behavior, not the Nova register assignment. The CPU6 port must publish fixed entry stubs or a versioned dispatch table with a stable native address.</p>
+<table>
+<thead><tr><th>Service</th><th>Nova vector (octal)</th><th>Required behavior</th></tr></thead>
+<tbody>
+<tr><td>COLD</td><td><code>0o1000</code></td><td>Initialize/start the system and load COMMAND; no normal return.</td></tr>
+<tr><td>WARM</td><td><code>0o1001</code></td><td>Reload COMMAND and jump to it; no normal return.</td></tr>
+<tr><td>SYSCALL</td><td><code>0o1002</code></td><td>Dispatch a service number; reject unsupported selectors.</td></tr>
+<tr><td>QUIT</td><td><code>0o1003</code></td><td>Halt or leave to monitor; no normal return.</td></tr>
+<tr><td>READBLK / WRITEBLK</td><td><code>0o1004 / 0o1005</code></td><td>Synchronous transfer of one logical filesystem payload; caller specifies unit, block and buffer.</td></tr>
+<tr><td>GETC</td><td><code>0o1006</code></td><td>Wait for one character; return its byte value. Do not echo inside GETC.</td></tr>
+<tr><td>PUTC</td><td><code>0o1007</code></td><td>Output one byte. No implicit newline translation.</td></tr>
+<tr><td>PUTS</td><td><code>0o1010</code></td><td>Output a zero-terminated string. Nova uses one character per word; CPU6 should define native byte strings explicitly.</td></tr>
+</tbody>
+</table>
+<h3>Nova calling convention (reference only)</h3>
+<ul>
+<li>Calls use <code>JSR</code> through a pointer to the service; AC3 holds the return link.</li>
+<li>Direct block calls: AC2 points to three words: drive, logical block, memory address. GETC returns AC0; PUTC consumes AC0; PUTS consumes AC2.</li>
+<li>Dispatcher: AC0 is selector, AC1 is argument pointer. Selectors: 1 PUTC (character at argument word 0), 2 GETC, 3 PUTS, 4 READBLK, 5 WRITEBLK.</li>
+<li>In the DSK implementation, direct <em>and dispatched</em> block operations return AC0 = 1 on success, 5 on failure. Dispatched PUTC/PUTS return 0; GETC returns the character. Do not assume all successful syscalls return zero.</li>
+<li>Routines use static return/work cells and are not reentrant. Assume scratch accumulators and condition state can be destroyed unless a particular service guarantees otherwise.</li>
+</ul>
+<h3>Recommended CPU6 ABI decisions</h3>
+<p>Use native pointers and native-width block numbers, with explicit unit and buffer fields. Define register preservation, stack ownership, interrupt policy, string encoding, argument sizes and result locations in an assembler include shared by kernel and applications. A simple new ABI can normalize all I/O status to zero = success and nonzero = error; this is intentionally different from Nova's block status and requires new callers. Keep hardware status available for diagnostics. Disk operations should have bounded waits and a documented retry policy rather than polling forever.</p>
+</section>
+<section id="disk">
+<h2>5. Disk format and Hawk 400-byte mapping</h2>
+<div class="note"><strong>Recommended first port:</strong> preserve the Nova filesystem's 128 × 16-bit-word (256-byte) logical payload, storing one logical block in each 400-byte Hawk block. This sacrifices capacity but avoids changing every directory, TYPE and loader calculation while bringing up new hardware.</div>
+<table>
+<thead><tr><th>Transport</th><th>Physical data size</th><th>CVIT payload</th><th>Remainder</th></tr></thead>
+<tbody>
+<tr><td>TC08 staging image</td><td>258 bytes (129 words)</td><td>First 256 bytes</td><td>2 unused bytes</td></tr>
+<tr><td>Nova DSK image</td><td>512 bytes (256 words)</td><td>First 256 bytes</td><td>256 ignored bytes</td></tr>
+<tr><td>Proposed Hawk compatibility image</td><td><strong>400 bytes</strong></td><td><strong>First 256 bytes</strong></td><td><strong>144 reserved bytes, zero on generated writes</strong></td></tr>
+</tbody>
+</table>
+<p>All sizes in this section are decimal. A 400-byte block is 200 16-bit words, <strong>not</strong> 400 words and not 256 words. This guide does not assume that the CPU6 is word-addressed.</p>
+<pre>Hawk block B, relative to a reserved CVIT partition:
+  bytes   0..255 : canonical CVIT payload
+  bytes 256..399 : reserved, zero when written; ignored on read
+
+physical address = controller_map(partition_base + B)
+require 0 &lt;= B &lt; partition_block_count</pre>
+<p>A file occupying N logical blocks occupies N Hawk blocks. This is one-to-one mapping, not a packed stream spanning physical-block boundaries. Do not copy a 258-byte or 512-byte image directly onto Hawk and expect block numbers to remain valid.</p>
+<h3>Driver adapter and buffer safety</h3>
+<pre>read_payload(unit, B, destination[256]):
+  check unit and partition bounds
+  hawk_read400(unit, partition_base + B, bounce[400])
+  if failed: return error without publishing partial data
+  copy bounce[0:256] to destination
+  return success
+
+write_payload(unit, B, source[256]):
+  check bounds and write permission
+  copy source to bounce[0:256]
+  fill bounce[256:400] with zero
+  hawk_write400(unit, partition_base + B, bounce)
+  return completion status</pre>
+<p>Reserve a 400-byte hardware-compatible bounce buffer in resident memory. Do not transfer 400 bytes directly into a 256-byte caller buffer. In contrast, Nova's current DSK loader reads 512 bytes directly at each destination while advancing by only 256 bytes; it requires 256 bytes of sacrificial headroom after the loaded extent. The bounce-buffer CPU6 contract removes that dependency.</p>
+<h3>Canonical payload encoding</h3>
+<p>Preserve the version-1 disk encoding for the compatibility profile: every 16-bit field is serialized <strong>little-endian</strong>, independent of CPU6 native byte order. In memory, decode fields explicitly or use accessor routines. Names pack the first character into a word's high byte, so their raw byte order differs from ordinary ASCII strings.</p>
+<p>Example: name <code>AB</code> produces word <code>0x4142</code>, serialized as bytes <code>42 41</code>. Header word <code>CV</code> is <code>0x4356</code>, bytes <code>56 43</code>. Do not compare raw disk name bytes against an ordinary character string without decoding.</p>
+<h3>Volume layout and header</h3>
+<p>Logical block 0 is the header; block 1 is the directory; file data starts at block 2. Each header field below is a 16-bit word; byte offset = 2 × word offset.</p>
+<table>
+<thead><tr><th>Word offset (decimal)</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td>0</td><td><code>0x4356</code> (CV)</td></tr>
+<tr><td>1</td><td><code>0x4E56</code> (NV)</td></tr>
+<tr><td>2</td><td>Format version = 1</td></tr>
+<tr><td>3</td><td>Directory start = 1</td></tr>
+<tr><td>4</td><td>Directory block count = 1</td></tr>
+<tr><td>5</td><td>First payload block = 2</td></tr>
+<tr><td>6</td><td>Next free block (one past the last allocated extent)</td></tr>
+<tr><td>7–127</td><td>Reserved, zero</td></tr>
+</tbody>
+</table>
+<p>The CV/NV signature is retained as a compatibility identifier; it does not identify the executable instruction set. Use only CPU6-built SYS members on a CPU6 volume. Version 1 has no architecture tag.</p>
+<h3>Directory entries</h3>
+<p>There are ten 24-byte entries in the directory payload; the final 16 payload bytes are zero. An unused entry has a zero first name word. Entries contain no fragmentation chain: every file is one contiguous extent.</p>
+<table>
+<thead><tr><th>Word offset (decimal)</th><th>Byte offset (decimal)</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td>0–4</td><td>0–9</td><td>Ten-character uppercase name, space-padded, two characters packed per word as described above.</td></tr>
+<tr><td>5</td><td>10</td><td>Type: 1 = TXT, 2 = BIN, 3 = SYS.</td></tr>
+<tr><td>6</td><td>12</td><td>Start logical block.</td></tr>
+<tr><td>7</td><td>14</td><td>Allocated logical block count.</td></tr>
+<tr><td>8</td><td>16</td><td>Load address, interpreted by the target architecture.</td></tr>
+<tr><td>9</td><td>18</td><td>Entry address, interpreted by the target architecture.</td></tr>
+<tr><td>10</td><td>20</td><td>Length in 16-bit storage words. TXT has one character per storage word, so this also equals its character count.</td></tr>
+<tr><td>11</td><td>22</td><td>Reserved, zero.</td></tr>
+</tbody>
+</table>
+<p>All fields are unsigned 16-bit values. Maximum recorded length is 65,535 storage words. Check arithmetic with wider intermediates. The Nova builder masks serialized fields to 16 bits; a CPU6 builder should reject overflow rather than silently truncate.</p>
+<h3>File representation and allocation</h3>
+<ul>
+<li><strong>TXT:</strong> each input byte becomes a 16-bit word with its high byte zero. Thus a full payload contains 128 text characters, not 256. Length excludes padding. LF is translated to CR+LF during TYPE, not during storage.</li>
+<li><strong>BIN/SYS:</strong> arbitrary bytes grouped into little-endian storage words. An odd final byte is padded with zero; the word-length field cannot preserve the original odd byte count.</li>
+<li>Allocate <code>max(1, ceil(length_words / 128))</code> blocks. Empty files still consume one block in the current builder. Zero-fill the last block beyond the valid length.</li>
+<li>Names are 1–10 characters, uppercased and space-padded. The target builder should restrict names to an agreed printable ASCII subset and reject duplicates after normalization.</li>
+<li>Only one directory block and ten entries are supported in this baseline; there are no subdirectories or runtime allocator.</li>
+</ul>
+<h3>Do not silently expand the payload to 400 bytes</h3>
+<p>A native 400-byte-payload filesystem would offer 200 words/block, 16 complete 24-byte entries per block, and 288 fewer wasted bytes per two physical blocks than this compatibility mapping. It would also require changes to header capacity, directory scan limits, extent calculations, load increments, TYPE loops, builders and validators. That is a <strong>separate, explicitly versioned format</strong>; it is not defined here. Start with the compatibility profile, then design a native format if the extra capacity is needed.</p>
+</section>
+<section id="loading">
+<h2>6. Native program format and memory ownership</h2>
+<p><strong>Nova reference:</strong> COMMAND is packaged as <code>[n1][n1 page-zero words][code...]</code>. Entry is load + 1 + n1 in Nova word addresses. Its prologue copies page-zero initialization words to <code>0o0050</code>. FOCAL uses a different startup trailer containing page-zero start/count/data. These are Nova implementation techniques, not portable executable formats.</p>
+<h3>Proposed minimal CPU6 executable profile</h3>
+<ul>
+<li>Use a flat native byte image, assembled for a fixed target load address. No runtime relocation, no implicit page-zero restore, and no Nova prefix.</li>
+<li>For this profile, directory load and entry fields are <strong>16-bit CPU6 byte-address offsets within one documented execution window</strong>. If the target needs wider or banked addresses, define that window/selector outside the file before implementation, or design a new executable format; do not truncate addresses.</li>
+<li>Store CPU6 instruction/data bytes unchanged as a byte stream in BIN/SYS payloads. The little-endian metadata encoding does not require swapping native instruction bytes. Storage length is <code>ceil(image_bytes / 2)</code>; an odd image gets a trailing zero byte.</li>
+<li>Require COMMAND and RUN members to be SYS. Entry must fall inside the initialized image. Validate that its entire extent and destination range are in bounds, non-wrapping, and do not overlap resident code, kernel data, bounce buffer, active loader state, or required stack.</li>
+<li>Advance disk block by one and destination byte address by 256. Copy only <code>min(256, remaining_storage_words * 2)</code> valid bytes on the final block. Rounded image padding must be harmless.</li>
+<li>Applications initialize their own workspace/stack. No implicit register values other than the documented ABI are promised. On exit, jump to WARM; do not expect COMMAND's registers or variables to survive.</li>
+</ul>
+<p>Before coding, draw a target memory map with resident kernel, vectors, stack, directory buffer (256 bytes), disk bounce buffer (400 bytes), shell, and application regions. If RUN is allowed to overwrite COMMAND, all code and variables needed to finish the load and jump must first be moved to resident memory. The current Nova RUN loop resides in COMMAND, so it is not a general overlap-safe loader.</p>
+<p>Nova reference addresses are word addresses: kernel <code>0o1000</code>, directory buffer <code>0o2000</code>, COMMAND <code>0o3000</code>, FOCAL <code>0o6000</code>, shell block scratch <code>0o7600</code>. Do not reuse these numerical values as CPU6 byte addresses without a new memory-layout design.</p>
+</section>
+<section id="shell">
+<h2>7. COMMAND behavior</h2>
+<table>
+<thead><tr><th>Input</th><th>Behavior</th></tr></thead>
+<tbody>
+<tr><td><code>STA</code></td><td>Read header block 0 and check volume signature; report readiness or invalid-volume/disk error. The CPU6 port should also validate version and fixed layout.</td></tr>
+<tr><td><code>CAT</code></td><td>Read directory block 1; display nonempty names in directory order.</td></tr>
+<tr><td><code>TYPE name</code></td><td>Find normalized name, save metadata before reusing directory scratch, and stream only valid data. TXT emits each word's low byte with LF → CR+LF; BIN/SYS emit low then high byte per word with no newline conversion.</td></tr>
+<tr><td><code>RUN name</code></td><td>Find member, require SYS, validate/load extent, jump to entry. No saved shell context.</td></tr>
+<tr><td>EOT (<code>0x04</code>)</td><td>At COMMAND input, quit/halt. Inside an application, interpretation belongs to that application; FOCAL uses it to return to COMMAND.</td></tr>
+<tr><td>Unknown command</td><td>Print <code>?WHAT</code>, then prompt again.</td></tr>
+</tbody>
+</table>
+<p>Normalize ASCII case, not arbitrary binary payloads. Use CR (<code>0x0D</code>) to submit a line; emit explicit CR+LF for terminal newlines. A CPU6 shell should bound its input buffer, discard or reject excess input safely, and define backspace/rubout handling. The Nova shell's small line workspace and simplistic parser are not a safe general parser specification. Full volume/library path syntax is future work; implement a single boot-volume member name first.</p>
+<p>Useful compatible diagnostics include <code>?DSK</code>, <code>?NOCMD</code> and <code>?SVC</code>. Add clear invalid-image/range errors for the CPU6 validator. On an application load failure after the shell has been overwritten, recover through resident WARM or stop safely; never jump into a partially loaded image.</p>
+</section>
+<section id="validation">
+<h2>8. Bring-up and acceptance checklist</h2>
+<ol>
+<li><strong>Console:</strong> transmit a fixed banner, receive/echo characters, test CR/LF, EOT and terminal buffering. Verify hardware acknowledgments do not repeat or lose characters.</li>
+<li><strong>Read-only Hawk driver:</strong> read a known test block repeatedly, confirm all 400 bytes, verify partition bounds and controller error handling. Use a scratch pack/partition.</li>
+<li><strong>Adapter:</strong> generate known 256-byte payloads, wrap into 400-byte blocks, compare reads byte-for-byte. Test the boundary between adjacent blocks and guard bytes around all buffers.</li>
+<li><strong>Filesystem:</strong> check exact header/name encodings; list zero, one and ten entries; reject bad signatures/version, overflowed or out-of-volume extents, overlapping reserved blocks, and duplicate names.</li>
+<li><strong>TYPE:</strong> empty, short, exactly 128-character, 129-character and multi-block TXT; BIN with distinct low/high bytes and final padding. Assert complete output and correct stopping at length.</li>
+<li><strong>Loader:</strong> launch a tiny native program that prints and jumps to WARM. Test missing COMMAND, non-SYS RUN, disk failure halfway through loading, illegal entry, and attempted kernel/buffer/loader overwrite.</li>
+<li><strong>Warm return:</strong> run an application that deliberately destroys shell workspace, return, then CAT/TYPE/RUN again. Verify the boot directory control block is unchanged across warm starts.</li>
+<li><strong>Writes, last:</strong> on disposable media only, write/read back a block, verify neighbors and reserved tail bytes, and exercise write-protect/failure status. Do not overwrite an existing Centurion filesystem.</li>
+<li><strong>Regression:</strong> compare complete expected terminal transcripts and require successful completion. Treat timeout as failure, not successful test termination.</li>
+</ol>
+<p>A useful first acceptance transcript is:</p>
+<pre>CVIT/CPU6
+]STA
+... READY
+]CAT
+COMMAND
+HELLO
+RETURNTEST
+]TYPE HELLO
+Hello from CVIT!
+]RUN RETURNTEST
+Application entered
+... COMMAND banner ...
+]CAT
+... directory still readable ...
+] &lt;EOT&gt;
+... halt or monitor return ...</pre>
+</section>
+<section>
+<h2>9. Source map and known documentation traps</h2>
+<ul>
+<li><a href="../../simh/cvit-kernel-simh.asm">simh/cvit-kernel-simh.asm</a>: active DSK kernel, fixed service vectors, console driver, block driver and COMMAND loader.</li>
+<li><a href="../../simh/cvit-command-simh.asm">simh/cvit-command-simh.asm</a>: active COMMAND implementation and RUN/TYPE logic.</li>
+<li><a href="../../scripts/run-dusky.sh">scripts/run-dusky.sh</a> and <a href="../../dusky/Program.cs">dusky/Program.cs</a>: host-assisted boot and console execution.</li>
+<li><a href="../../scripts/mk_cvit_nova.py">scripts/mk_cvit_nova.py</a>: authoritative version-1 image encoding. No Hawk writer currently exists.</li>
+<li><a href="../../scripts/abs2bin.py">scripts/abs2bin.py</a> and <a href="../../scripts/abs2flat.py">scripts/abs2flat.py</a>: Nova-specific executable packaging, not CPU6 assemblers.</li>
+<li><a href="../cvit-nova.md">Nova notes</a>, <a href="../cvit-filesystem.md">filesystem specification</a>, <a href="../focal.md">FOCAL</a>, and <a href="friction.md">bring-up friction log</a>.</li>
+</ul>
+<p>When prose conflicts with code, inspect the current implementation. Older notes describe 11-word directory entries (the format actually uses 12), no return from RUN (warm return now exists), or uniformly zero success status (DSK block calls actually return 1). Nova assembly defaults to octal: directory length is decimal word offset 10, written <code>0o12</code>, not octal 10. Explicit units, named offsets and two-sided branch tests prevent costly porting errors.</p>
+</section>
+</main>
+<footer><p>CPU6 portability is at the service and filesystem level, not at the binary or device-register level. Keep the first port small, bounded, and independently testable.</p></footer>
+</body>
+</html>

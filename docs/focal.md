@@ -4,6 +4,12 @@ FOCAL/Nova is a FOCAL interpreter for cvit/Nova, written in Nova assembly
 (`sd/focal.asm`) with software floating point. It runs as a CVIT `RUN`
 member on both Dusky and SIMH.
 
+FOCAL/Nova is an independent implementation of the FOCAL language,
+written from scratch for this project and released under the repository's
+MIT license. It contains no DEC code and is not affiliated with or
+endorsed by Digital Equipment Corporation or its successors. FOCAL was a
+DEC trademark.
+
 ```text
 ]RUN FOCAL
 
