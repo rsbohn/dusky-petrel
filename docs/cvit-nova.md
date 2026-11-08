@@ -23,6 +23,7 @@ run the same image files.
 | `0o1000` | resident cvit/Nova kernel jump table |
 | `0o2000` | kernel directory buffer (DIRBUF, 256 words) |
 | `0o3000` | `COMMAND` load address (from directory) |
+| `0o6000` | `FOCAL` load address (see `docs/focal.md`) |
 | `0o7600` | scratch/block buffer area |
 
 ## Kernel jump table
@@ -34,7 +35,7 @@ the kernel image. Existing vector addresses are preserved:
 | Address | Vector | Description |
 | --- | --- | --- |
 | `0o1000` | cold start | Print banner, load COMMAND from disk, transfer control |
-| `0o1001` | warm start | (reserved) |
+| `0o1001` | warm start | Reload COMMAND from disk and transfer to it (return point for RUN programs) |
 | `0o1002` | syscall dispatch | AC0 = selector (see below) |
 | `0o1003` | quit | HALT the machine |
 | `0o1004` | read block | AC2 = control block (drive, block, mem) |
@@ -171,8 +172,9 @@ Expected: kernel banner, COMMAND auto-loads from disk, `]` prompt.
 `STA` → `TC0: CVNV READY`; `CAT` → lists directory names;
 `TYPE <name>` → prints file contents; `RUN <name>` → loads a `TYPE_SYS`
 member at its directory load address and transfers to its entry address;
-`FOO` → `?WHAT`; EOT → HALT. A running program that halts ends the simulation;
-returning to the COMMAND prompt is not yet supported.
+`FOO` → `?WHAT`; EOT → HALT. A RUN program returns to the COMMAND prompt by
+jumping through the warm start vector (`JMP @` a cell holding `0o1001`),
+which reloads COMMAND from disk; a program that halts ends the simulation.
 
 ## Status
 
@@ -181,5 +183,5 @@ returning to the COMMAND prompt is not yet supported.
 - [x] Cold start loads COMMAND from disk; EOT returns to kernel HALT
 - [x] STA, CAT, TYPE, and RUN commands
 - [x] RUN loads `TYPE_SYS` members and transfers to their directory entry address
-- [ ] Return from a RUN program to the COMMAND prompt
-- [ ] Nova FOCAL with software floating point
+- [x] Return from a RUN program to the COMMAND prompt (warm start reloads COMMAND)
+- [x] Nova FOCAL with software floating point (`RUN FOCAL`, see `docs/focal.md`)

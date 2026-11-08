@@ -109,7 +109,7 @@ DIV:    STA AC3, DRET
         MOV AC1, AC1, SNR
         JMP DZDIV
         LDA AC2, ZW
-DIVL:   SUBZ AC1, AC0, SZC
+DIVL:   SUBZ AC1, AC0, SNC  ; carry=1 when AC0 >= AC1
         JMP DIVD
         INC AC2, AC2
         JMP DIVL
@@ -134,10 +134,10 @@ PRTD:   JMP @SRET
 ; Put character in AC0 to TTO
 PUTC:   STA AC0, PCH
         STA AC3, CRET
-PUTW:   SKPDN TTO
+PUTW:   SKPBZ TTO
         JMP PUTW
         LDA AC0, PCH
-        DOA AC0, TTO
+        DOAS AC0, TTO
         JMP @CRET
 
 ; Data area in zero page

@@ -2,7 +2,8 @@
 # Build a bootable cvit/Nova TC08 image from the current sources.
 # Usage: scripts/build-image.sh [output.img]
 # Requires: dotnet (to build the dusky assembler), python3
-# Output: TC08 image with COMMAND (from sd/cvit-command.asm) + HELLO test file.
+# Output: TC08 image with COMMAND (from sd/cvit-command.asm), FOCAL
+# (from sd/focal.asm), and a HELLO test file.
 set -e
 cd "$(dirname "$0")/.."
 
@@ -24,8 +25,13 @@ echo "Converting to flat image..."
 python3 scripts/abs2bin.py "$TMPDIR/command.abs" "$TMPDIR/command.bin"
 # abs2bin.py prints: n1=... ; entry = 0o3000 + 1 + n1
 N1=$(python3 -c "import struct; print(struct.unpack_from('<H', open('$TMPDIR/command.bin','rb').read())[0])")
-ENTRY=$(printf '0o%o' $(( 0o3000 + 1 + N1 )))
+# 1536 = 0o3000 (POSIX sh has no 8# literals, so the script also runs under sh)
+ENTRY=$(printf '0o%o' $(( 1536 + 1 + N1 )))
 echo "n1=$N1 entry=$ENTRY"
+
+echo "Assembling FOCAL..."
+dotnet "$SNOVA" abs sd/focal.asm "$TMPDIR/focal.abs" --format simh-load
+python3 scripts/abs2flat.py --pz "$TMPDIR/focal.abs" "$TMPDIR/focal.sys" 0o6000
 
 cat > "$TMPDIR/hello.txt" <<'EOF'
 Hello from TYPE!
@@ -36,6 +42,7 @@ EOF
 echo "Building TC08 image..."
 python3 scripts/mk_cvit_nova.py "$OUT" \
     "COMMAND=$TMPDIR/command.bin@0o3000,$ENTRY" \
+    "FOCAL=$TMPDIR/focal.sys@0o6000,0o6000" \
     "HELLO=$TMPDIR/hello.txt"
 
 echo "Done: $OUT"

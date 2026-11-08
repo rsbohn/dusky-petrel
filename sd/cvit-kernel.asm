@@ -53,14 +53,13 @@ BANNER:  DW 0o015, 0o012
          .TXT "cvit/Nova V0.1"
          DW 0o015, 0o012, 0
 
-WARM:   LDA AC2, PROMPTP
-        JSR @P_PUTS2
+; WARM: return point for RUN programs (JMP @ to 0o1001).  Reloads
+; COMMAND from disk, since a program may have overwritten COMMAND's
+; memory and page-zero cells.  Returns (and halts) only on failure.
+WARM:   JSR @P_LOADCMD2
         HALT
 
-PROMPTP: DW PROMPT
-P_PUTS2: DW PUTS
-
-PROMPT:  DW 0o015, 0o012, 0o135, 0
+P_LOADCMD2: DW LOADCMD
 
 QUIT:   HALT
 
@@ -382,7 +381,7 @@ LD_FOUND:
 LD_BLP:  LDA AC3, LCOUNT
         MOV AC3, AC3, SNR
         JMP LD_GO
-        LDA AC2, DSKCB
+        LDA AC2, LDCBP
         LDA AC0, LBLK
         STA AC0, 1,AC2
         LDA AC0, LLOAD
@@ -423,6 +422,7 @@ DSKCB:   DW 0
          DW 1
          DW DIRBUF
 DSKCBP:  DW DSKCB
+LDCBP:   DW LDCB
 NENTS:   DW 0o12
 ENTWORDS:DW 0o14
 ONE4:    DW 1
@@ -441,6 +441,11 @@ DSKERR:  DW 0o077
 NOCMD:   DW 0o077
          .TXT "NOCMD"
          DW 0o015, 0o012, 0
+; Member-load control block, separate from DSKCB so the directory read
+; stays (drive 0, block 1, DIRBUF) across warm starts.
+LDCB:    DW 0
+         DW 0
+         DW 0
 
 ; Directory scratch buffer.  Kept clear of the kernel, COMMAND (0o3000+),
 ; and the 0o7600 block buffer.

@@ -21,3 +21,13 @@
 ## Assembler
 - Use the built-in assembler via `asm <file> [addr]`.
 - `sd/` holds sample assembly programs.
+
+## CPU semantics
+- Operate instructions follow real Nova carry rules, matching SIMH: the carry
+  field sets the base carry, an ALU carry-out complements it (`SUBZ` leaves
+  carry = 1 when dst >= src), and `#` no-load leaves both AC and carry alone.
+  `scripts/test-carry-parity.sh` checks this against SIMH.
+
+## FOCAL
+- `sd/focal.asm` is FOCAL/Nova, a CVIT RUN member at `0o6000`; see `docs/focal.md`.
+- Test: `scripts/test-focal.sh` (Dusky and SIMH against `testdata/focal-session.expected`).

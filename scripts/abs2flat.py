@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
-"""Flatten one contiguous SIMH-load absolute-image region into little-endian words."""
+"""Flatten one contiguous SIMH-load absolute-image region into little-endian words.
+
+usage: abs2flat.py [--pz] input.abs output.bin start-address
+
+With --pz, words assembled below 0o400 (the member's page-zero cells) are
+removed from the code region and appended after it as
+
+    [pz-start][pz-count][pz-words...]
+
+The member places a label (conventionally PZIMG) at the very end of its
+source so its startup code can copy that block back to page zero.  The
+page-zero words must be contiguous.  See sd/focal.asm.
+"""
 import struct
 import sys
 
+PZ_LIMIT = 0o400
 
-def main() -> None:
-    if len(sys.argv) != 4:
-        raise SystemExit("usage: abs2flat.py input.abs output.bin start-address")
-    source, destination, address_text = sys.argv[1:]
-    start = int(address_text, 0) if address_text.lower().startswith("0x") else int(address_text, 8)
+
+def parse_abs(source: str) -> dict[int, int]:
     data = open(source, "rb").read()
     pos = 0
     while pos < len(data) and data[pos] == 0:
@@ -24,15 +34,48 @@ def main() -> None:
         pos += 2 * length
         for offset, word in enumerate(block):
             words[address + offset] = word
-    if start not in words:
-        raise SystemExit(f"error: no words at start address {start:o}")
+    return words
+
+
+def contiguous(words: dict[int, int], start: int, what: str) -> list[int]:
     end = max(words) + 1
     missing = next((addr for addr in range(start, end) if addr not in words), None)
     if missing is not None:
-        raise SystemExit(f"error: image is not contiguous at {missing:o}")
+        raise SystemExit(f"error: {what} is not contiguous at {missing:o}")
+    return [words[a] for a in range(start, end)]
+
+
+def main() -> None:
+    args = sys.argv[1:]
+    with_pz = False
+    if args and args[0] == "--pz":
+        with_pz = True
+        args = args[1:]
+    if len(args) != 3:
+        raise SystemExit("usage: abs2flat.py [--pz] input.abs output.bin start-address")
+    source, destination, address_text = args
+    start = int(address_text, 0) if address_text.lower().startswith("0x") else int(address_text, 8)
+    words = parse_abs(source)
+    pz = {a: w for a, w in words.items() if a < PZ_LIMIT}
+    code = {a: w for a, w in words.items() if a >= PZ_LIMIT}
+    if pz and not with_pz:
+        raise SystemExit(f"error: image has page-zero words at {min(pz):o}; use --pz")
+    if start not in code:
+        raise SystemExit(f"error: no words at start address {start:o}")
+    if min(code) < start:
+        raise SystemExit(f"error: words below start address at {min(code):o}")
+    image = contiguous(code, start, "image")
+    end = start + len(image)
+    if with_pz:
+        if not pz:
+            raise SystemExit("error: --pz given but image has no page-zero words")
+        pzstart = min(pz)
+        pzwords = contiguous(pz, pzstart, "page-zero region")
+        image += [pzstart, len(pzwords)] + pzwords
+        print(f"page zero: {len(pzwords)} words from {pzstart:o}, image at {end:o}")
     with open(destination, "wb") as output:
-        output.write(struct.pack("<" + "H" * (end - start), *(words[a] for a in range(start, end))))
-    print(f"wrote {end - start} words from {start:o} to {end:o} in {destination}")
+        output.write(struct.pack("<" + "H" * len(image), *image))
+    print(f"wrote {len(image)} words from {start:o} to {start + len(image):o} in {destination}")
 
 
 if __name__ == "__main__":

@@ -82,6 +82,6 @@ verification run lives at `quack:/srv/share/dusky/`.
 - Stage-2 DSK bootstrap: a small program that reads the kernel sectors
   into 0o1000 so the kernel is booted from disk instead of LOADed.
 - Kernel cold start loading COMMAND from the directory into 0o3000.
-- Return from RUN to COMMAND, then Nova FOCAL (per the standing order in
-  `docs/cvit-nova.md`). `RUN <name>` now executes TYPE_SYS members; the
-  current calendar sample is tested on both Dusky and SIMH.
+- Done: return from RUN to COMMAND (kernel warm start reloads COMMAND),
+  and Nova FOCAL (`RUN FOCAL`, `docs/focal.md`), tested on Dusky and SIMH
+  by `scripts/test-focal.sh`.

@@ -11,7 +11,7 @@ DIV:    STA AC3, DRET
         MOV AC1, AC1, SNR
         JMP DZDIV
         LDA AC2, 0
-DIVL:   SUBZ AC1, AC0, SZC
+DIVL:   SUBZ AC1, AC0, SNC  ; carry=1 when AC0 >= AC1
         JMP DIVD
         INC AC2, AC2
         JMP DIVL

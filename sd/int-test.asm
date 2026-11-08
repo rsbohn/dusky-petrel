@@ -17,7 +17,7 @@ LOOP:   LDA     AC0, CHAR
         AND     AC1, AC0
         STA     AC0, CHAR
         LDA     AC1, AT_CHAR
-        SUBZ#   AC1, AC0, SZC
+        SUBZ#   AC1, AC0, SNC   ; carry=1 when CHAR >= @
         LDA     AC0, DOT_CHAR
         DOA     AC0, TTO
         LDA     AC0, @SLOWLY

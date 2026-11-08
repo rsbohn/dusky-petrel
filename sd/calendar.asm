@@ -1,6 +1,8 @@
 ; Print a fixed November 2026 calendar.
 ; Standalone Nova program: assemble at 0o2000 and run on SIMH or Dusky.
 ; November 1, 2026 is Sunday. This intentionally uses no RTC.
+; Under CVIT, RUN CALENDAR returns to COMMAND through the kernel warm
+; start vector (0o1001).
 
         ORG     0o2000
 
@@ -8,7 +10,7 @@ START:  LDA     AC2, TEXTADR
 NEXT:   LDA     AC0, 0,AC2
         MOV     AC0, AC0, SZR
         JMP     OUTPUT
-        HALT
+        JMP     @WARMP
 OUTPUT: SKPBZ   TTO
         JMP     OUTPUT
         DOAS    AC0, TTO
@@ -16,6 +18,7 @@ OUTPUT: SKPBZ   TTO
         JMP     NEXT
 
 TEXTADR: DW      TEXT
+WARMP:   DW      0o1001
 TEXT:
         DW      0o40, 0o40, 0o40, 0o40, 0o40, 0o40, 0o116, 0o157
         DW      0o166, 0o145, 0o155, 0o142, 0o145, 0o162, 0o40, 0o62

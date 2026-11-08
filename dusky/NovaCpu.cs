@@ -358,62 +358,68 @@ public class NovaCpu
         var dstValue = Accumulators[dst];
         var description = $"OPR src=AC{src} dst=AC{dst}";
 
-        var carryIn = ApplyCarryControl(carryControl);
+        // Nova operate semantics: the carry control field sets the base
+        // carry; an ALU carry out of bit 0 complements it.  The shifter
+        // rotates the 17-bit carry:result word, the skip tests the shifted
+        // values, and the no-load bit (#) suppresses loading both the
+        // accumulator and the carry.
+        var carry = CarryBase(carryControl);
         var result = (ushort)0;
-        var carryOut = Link;
-        var updatesCarry = false;
-
         switch (alu)
         {
             case 0: // COM
                 result = (ushort)~srcValue;
                 break;
             case 1: // NEG
-                (result, carryOut) = AddWithCarry((ushort)~srcValue, 0, true);
-                updatesCarry = true;
+                result = (ushort)(-srcValue & WordMask);
+                carry ^= srcValue == 0;
                 break;
             case 2: // MOV
                 result = srcValue;
                 break;
             case 3: // INC
-                (result, carryOut) = AddWithCarry(srcValue, 1, false);
-                updatesCarry = true;
+                result = (ushort)((srcValue + 1) & WordMask);
+                carry ^= srcValue == WordMask;
                 break;
-            case 4: // ADC
-                (result, carryOut) = AddWithCarry(dstValue, srcValue, carryIn);
-                updatesCarry = true;
+            case 4: // ADC: dst + ~src
+                {
+                    var total = dstValue + ((~srcValue) & WordMask);
+                    result = (ushort)(total & WordMask);
+                    carry ^= total > WordMask;
+                }
                 break;
-            case 5: // SUB
-                // Nova SUB does not use carry as borrow (unlike SBC)
-                (result, carryOut) = SubtractWithBorrow(dstValue, srcValue, false);
-                updatesCarry = true;
+            case 5: // SUB: dst + ~src + 1, carry out when dst >= src
+                {
+                    var total = dstValue + ((~srcValue) & WordMask) + 1;
+                    result = (ushort)(total & WordMask);
+                    carry ^= total > WordMask;
+                }
                 break;
             case 6: // ADD
-                (result, carryOut) = AddWithCarry(dstValue, srcValue, false);
-                updatesCarry = true;
+                {
+                    var total = dstValue + srcValue;
+                    result = (ushort)(total & WordMask);
+                    carry ^= total > WordMask;
+                }
                 break;
             case 7: // AND
                 result = (ushort)(dstValue & srcValue);
                 break;
         }
 
-        if (updatesCarry)
-        {
-            Link = carryOut;
-        }
-
-        result = ApplyShift(result, shift, Link, out var shiftCarry);
+        result = ApplyShift(result, shift, carry, out var shiftCarry);
         if (shiftCarry.HasValue)
         {
-            Link = shiftCarry.Value;
+            carry = shiftCarry.Value;
         }
 
         if (!noLoad)
         {
             Accumulators[dst] = result;
+            Link = carry;
         }
 
-        var tookBranch = ApplySkip(skip, result);
+        var tookBranch = ApplySkip(skip, result, carry);
         if (tookBranch)
         {
             ProgramCounter = (ushort)((ProgramCounter + 1) & AddressMask);
@@ -460,18 +466,15 @@ public class NovaCpu
         return (ushort)(ReadMemory(pointer) & AddressMask);
     }
 
-    private bool ApplyCarryControl(int carryControl)
+    private bool CarryBase(int carryControl)
     {
-        var carryIn = carryControl switch
+        return carryControl switch
         {
             1 => false,
             2 => true,
             3 => !Link,
             _ => Link
         };
-
-        Link = carryIn;
-        return carryIn;
     }
 
     private static ushort ApplyShift(ushort value, int shift, bool linkIn, out bool? carryOut)
@@ -492,35 +495,19 @@ public class NovaCpu
         }
     }
 
-    private bool ApplySkip(int skip, ushort result)
+    private static bool ApplySkip(int skip, ushort result, bool carry)
     {
         return skip switch
         {
             1 => true,
-            2 => !Link,
-            3 => Link,
+            2 => !carry,
+            3 => carry,
             4 => result == 0,
             5 => result != 0,
-            6 => !Link || result == 0,
-            7 => Link && result != 0,
+            6 => !carry || result == 0,
+            7 => carry && result != 0,
             _ => false
         };
-    }
-
-    private static (ushort Result, bool Carry) AddWithCarry(ushort left, ushort right, bool link)
-    {
-        var carryIn = link ? 1 : 0;
-        var total = left + right + carryIn;
-        return ((ushort)(total & WordMask), (total & ~WordMask) != 0);
-    }
-
-    private static (ushort Result, bool Borrow) SubtractWithBorrow(ushort left, ushort right, bool link)
-    {
-        // Link acts as a borrow bit here as a small convenience for chaining.
-        var borrowIn = link ? 1 : 0;
-        var total = left - right - borrowIn;
-        var borrow = total < 0;
-        return ((ushort)(total & WordMask), borrow);
     }
 
     private static bool IsZero(ushort value) => value == 0;

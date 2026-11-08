@@ -83,7 +83,7 @@ if (consoleMode)
 {
     var attach = monitor.ExecuteCommandLine($"dsk0 attach {consoleImage}", allowExit: false);
     Console.Write(attach);
-    var assemble = monitor.ExecuteCommandLine("asm simh/cvit-kernel-simh.asm 0o1000", allowExit: false);
+    var assemble = monitor.ExecuteCommandLine($"asm {FindKernelSource()} 0o1000", allowExit: false);
     Console.Write(assemble);
     if (!assemble.StartsWith("Assembled ", StringComparison.Ordinal))
     {
@@ -107,6 +107,8 @@ if (consoleMode)
                 tty.EnqueueInputBytes(new byte[] { 0x0D });
             else if (key.Key == ConsoleKey.D && key.Modifiers.HasFlag(ConsoleModifiers.Control))
                 tty.EnqueueInputBytes(new byte[] { 0x04 });
+            else if (key.Key == ConsoleKey.Backspace)
+                tty.EnqueueInputBytes(new byte[] { 0x7F }); // rubout
             else if (key.Key == ConsoleKey.C && key.Modifiers.HasFlag(ConsoleModifiers.Control))
                 cpu.Halt("Break");
             else if (!char.IsControl(key.KeyChar))
@@ -122,7 +124,7 @@ if (consoleMode)
 else if (batchMode)
 {
     var attachB = monitor.ExecuteCommandLine($"dsk0 attach {batchImage}", allowExit: false);
-    var assembleB = monitor.ExecuteCommandLine($"asm /Users/rsbohn/build/dusky-petrel/simh/cvit-kernel-simh.asm 0o1000", allowExit: false);
+    var assembleB = monitor.ExecuteCommandLine($"asm {FindKernelSource()} 0o1000", allowExit: false);
     if (!assembleB.StartsWith("Assembled ", StringComparison.Ordinal))
     {
         Console.Error.WriteLine($"Assemble failed: {assembleB}");
@@ -137,7 +139,10 @@ else if (batchMode)
     var capture = new StringWriter();
     Console.SetOut(capture);
     cpu.SetProgramCounter(0x200);
-    var maxSteps = 10000000;
+    // SNOVA_BATCH_STEPS raises the instruction budget for long programs.
+    var maxSteps = int.TryParse(Environment.GetEnvironmentVariable("SNOVA_BATCH_STEPS"), out var envSteps) && envSteps > 0
+        ? envSteps
+        : 10000000;
     var steps = 0;
     while (!cpu.Halted && steps < maxSteps)
     {
@@ -154,3 +159,19 @@ else
 }
 unixConsole?.Dispose();
 return 0;
+
+// The CVIT kernel source: relative to the working directory, else found by
+// walking up from the build output (dusky/bin/<config>/<tfm>/) to the repo.
+static string FindKernelSource()
+{
+    const string relative = "simh/cvit-kernel-simh.asm";
+    if (File.Exists(relative))
+        return relative;
+    for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+    {
+        var candidate = Path.Combine(dir.FullName, relative);
+        if (File.Exists(candidate))
+            return candidate;
+    }
+    return relative;
+}

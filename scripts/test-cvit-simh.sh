@@ -32,7 +32,7 @@ python3 simh/convert-tc08-to-dsk.py "$TMPDIR/cvit-tc08.img" "$TMPDIR/cvit-dsk.im
 cat > "$TMPDIR/simh.ini" <<EOF
 attach dsk $TMPDIR/cvit-dsk.img
 load $TMPDIR/kernel.abs
-send after=100000,delay=1000 "STA\\rCAT\\rTYPE HELLO\\rRUN CALENDAR\\r\\004"
+send after=100000,delay=20000 "STA\\rCAT\\rTYPE HELLO\\rRUN CALENDAR\\rFOO\\r\\004"
 go 1000
 EOF
 # EOT halts the simulated CPU; the timeout also bounds the run if a regression
@@ -72,4 +72,5 @@ assert_output 'This is a sample text file.'
 assert_output 'November 2026'
 assert_output 'Su  Mo  Tu  We  Th  Fr  Sa'
 assert_output ' 1   2   3   4   5   6   7'
+assert_output '?WHAT'
 echo 'CVIT/SIMH acceptance tests passed.'

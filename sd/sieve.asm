@@ -30,7 +30,7 @@ SIEVE:  STA AC3, SV_RET
 
 SV_PLP: LDA AC0, SV_P
         LDA AC1, V100
-        SUBZ AC1, AC0, SNC  ; if p >= 100, done (sqrt(9999) < 100)
+        SUBZ AC1, AC0, SZC  ; if p >= 100, done (sqrt(9999) < 100)
         JMP SV_DN
 
         LDA AC0, SV_P
@@ -51,7 +51,7 @@ SV_PLP: LDA AC0, SV_P
 
 SV_MLP: LDA AC0, SV_M
         LDA AC1, V10000
-        SUBZ AC1, AC0, SNC  ; if m >= 10000, exit loop
+        SUBZ AC1, AC0, SZC  ; if m >= 10000, exit loop
         JMP SV_MDN
         LDA AC0, SV_M
         JSR CLRBIT
@@ -273,7 +273,7 @@ DIV:    STA AC3, D_RET
         MOV AC1, AC1, SNR   ; Divisor zero?
         JMP DZDIV
         LDA AC2, ZW         ; Quotient
-DIV_LP: SUBZ AC1, AC0, SZC  ; Can subtract?
+DIV_LP: SUBZ AC1, AC0, SNC  ; Can subtract? (carry=1 when AC0 >= AC1)
         JMP DIV_DN
         INC AC2, AC2
         JMP DIV_LP
@@ -298,10 +298,10 @@ PS_DN:  JMP @PS_RET
 ; Output character in AC0
 PUTCH:  STA AC0, PC_CH
         STA AC3, PC_RET
-PC_WT:  SKPDN TTO
+PC_WT:  SKPBZ TTO
         JMP PC_WT
         LDA AC0, PC_CH
-        DOA AC0, TTO
+        DOAS AC0, TTO
         JMP @PC_RET
 
 ; Write bitmap to tape unit 0
