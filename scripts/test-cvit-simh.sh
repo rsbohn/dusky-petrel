@@ -11,9 +11,7 @@ done
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 SNOVA="dusky/bin/Release/net9.0/Snova.dll"
-if [[ ! -f "$SNOVA" ]]; then
-    dotnet build dusky/Snova.csproj -c Release --nologo -v q
-fi
+dotnet build dusky/Snova.csproj -c Release --nologo -v q
 
 dotnet "$SNOVA" abs simh/cvit-kernel-simh.asm "$TMPDIR/kernel.abs" --format simh-load
 dotnet "$SNOVA" abs simh/cvit-command-simh.asm "$TMPDIR/command.abs" --format simh-load --start 3000

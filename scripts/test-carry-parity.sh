@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SIMH_NOVA="${SIMH_NOVA:-nova}"
 SNOVA="dusky/bin/Release/net9.0/Snova.dll"
-[[ -f "$SNOVA" ]] || dotnet build dusky/Snova.csproj -c Release --nologo -v q
+dotnet build dusky/Snova.csproj -c Release --nologo -v q
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 dotnet "$SNOVA" abs sd/carry-test.asm "$TMPDIR/carry.abs" --format simh-load >/dev/null

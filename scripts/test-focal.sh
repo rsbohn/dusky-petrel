@@ -11,7 +11,7 @@ SNOVA="dusky/bin/Release/net9.0/Snova.dll"
 for tool in "$SIMH_NOVA" dotnet python3; do
     command -v "$tool" >/dev/null 2>&1 || { echo "Required command not found: $tool" >&2; exit 1; }
 done
-[[ -f "$SNOVA" ]] || dotnet build dusky/Snova.csproj -c Release --nologo -v q
+dotnet build dusky/Snova.csproj -c Release --nologo -v q
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 

@@ -6,6 +6,7 @@ export PATH="$HOME/.local/bin:$HOME/.dotnet:$PATH"
 TMPDIR=$(mktemp -d)
 trap "rm -rf $TMPDIR" EXIT
 echo "Building..."
+dotnet build "$REPO/dusky/Snova.csproj" -c Release --nologo -v q
 dotnet "$REPO/dusky/bin/Release/net9.0/Snova.dll" abs "$REPO/simh/cvit-kernel-simh.asm" "$TMPDIR/kernel.abs" --format simh-load > /dev/null
 dotnet "$REPO/dusky/bin/Release/net9.0/Snova.dll" abs "$REPO/simh/cvit-command-simh.asm" "$TMPDIR/command.abs" --format simh-load --start 3000 > /dev/null
 python3 "$REPO/scripts/abs2bin.py" "$TMPDIR/command.abs" "$TMPDIR/command.bin" > /dev/null
