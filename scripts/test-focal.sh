@@ -16,6 +16,7 @@ TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
 dotnet "$SNOVA" abs simh/cvit-kernel-simh.asm "$TMPDIR/kernel.abs" --format simh-load >/dev/null
+dotnet "$SNOVA" abs sd/cvit-extension.asm "$TMPDIR/extension.abs" --format simh-load >/dev/null
 dotnet "$SNOVA" abs simh/cvit-command-simh.asm "$TMPDIR/command.abs" --format simh-load --start 3000 >/dev/null
 dotnet "$SNOVA" abs sd/focal.asm "$TMPDIR/focal.abs" --format simh-load >/dev/null
 python3 scripts/abs2bin.py "$TMPDIR/command.abs" "$TMPDIR/command.bin" >/dev/null
@@ -40,7 +41,7 @@ esc = (data.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
 # SIMH drops a character that arrives while the program is busy, so pace
 # input well beyond the longest command in the session.
 open(ini, "w").write(
-    f"attach dsk {tmp}/cvit-dsk.img\nload {tmp}/kernel.abs\n"
+    f"attach dsk {tmp}/cvit-dsk.img\nload {tmp}/kernel.abs\nload {tmp}/extension.abs\n"
     f'send after=200000,delay=200000 "{esc}"\ngo 1000\nexit\n')
 PY
 
@@ -56,7 +57,16 @@ if [[ "${1:-}" == "--update" ]]; then
     echo "Updated testdata/focal-session.expected from Dusky."
     exit 0
 fi
-timeout 60 "$SIMH_NOVA" "$TMPDIR/simh.ini" < /dev/null 2>&1 | extract > "$TMPDIR/simh.txt" || true
+python3 - "$SIMH_NOVA" "$TMPDIR/simh.ini" <<'PY' | extract > "$TMPDIR/simh.txt"
+import subprocess, sys
+try:
+    result = subprocess.run([sys.argv[1], sys.argv[2]], stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            timeout=60)
+    sys.stdout.buffer.write(result.stdout)
+except subprocess.TimeoutExpired as exc:
+    sys.stdout.buffer.write(exc.stdout or b'')
+PY
 
 status=0
 for emu in dusky simh; do

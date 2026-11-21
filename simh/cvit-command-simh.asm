@@ -7,7 +7,7 @@
 ; this file holds no device drivers of its own.
 ;
 ; Commands:
-;   CAT    read TC0 block 1 into 0o7600 and list flat directory names
+;   CAT    enumerate live directory entries using the kernel filesystem API
 ;   STA    read SYS block 0 and report volume status
 ;   SYS:   alias for the boot media (DSK0 on SIMH)
 ;   File spec (future): VOLUME:LIBRARY/MEMBER
@@ -39,6 +39,7 @@ MAGIC0:  DW 0o41526    ; "CV"
 MAGIC1:  DW 0o47126    ; "NV"
 
 ; Kernel vectors (stable jump table at 0o1000).
+KSYSP:   DW 0o1002
 KQUITP:  DW 0o1003
 KRDBLKP: DW 0o1004
 KGETCP:  DW 0o1006
@@ -52,6 +53,14 @@ LINEP:   DW LINE
 DIRP:    DW 0o7600
 RDBCBP:  DW RDBCB
 STACBP:  DW STACB
+CURSORP: DW 0o7200
+LOOKCBP: DW LOOKCB
+PKNAMEP: DW PKNAME
+SIX:     DW 6
+SEVEN:   DW 7
+PACKEDP: DW PACKED
+LOOKCB:  DW 0, PACKED, 0o7600
+PACKED:  DW 0,0,0,0,0
 HELLOP:  DW HELLO
 BADP:    DW BADMSG
 DSKERRP: DW DSKERR
@@ -274,39 +283,31 @@ BAD:    LDA AC2, BADP
         JSR @KPUTSP
         JMP PROMPT
 
-DO_CAT: LDA AC2, RDBCBP
-        JSR @KRDBLKP
-        LDA AC3, ONE
-        SUBZ AC3, AC0
+DO_CAT: LDA AC2, CURSORP
+        LDA AC0, ZERO
+        STA AC0, 0,AC2
+        STA AC0, 1,AC2
+        STA AC0, 2,AC2
+        LDA AC0, DIRP
+        STA AC0, 3,AC2
+        LDA AC2, CATHEADP
+        JSR @KPUTSP
+CATLP:  LDA AC1, CURSORP
+        LDA AC0, SIX
+        JSR @KSYSP
         MOV AC0, AC0, SNR
-        JMP CAT_OK
+        JMP CATENTRY
+        LDA AC3, ONE
+        SUB# AC3, AC0, SNR
+        JMP CATDONE
         LDA AC2, DSKERRP
         JSR @KPUTSP
-        JMP PROMPT
-
-CAT_OK: LDA AC2, CATHEADP
-        JSR @KPUTSP
-        LDA AC3, DIRP
-        STA AC3, ENTPTR
-        LDA AC3, NENTS
-        STA AC3, ENTCNT
-CATLP:  LDA AC2, ENTPTR
-        LDA AC0, 0,AC2
-        MOV AC0, AC0, SNR
-        JMP CATDONE
+        JMP @PROMPTP
+CATENTRY:
+        LDA AC2, DIRP
         JSR @PNAMEP
         LDA AC2, NLP
         JSR @KPUTSP
-        LDA AC3, ENTPTR
-        LDA AC0, ENTWORDS
-        ADD AC0, AC3
-        STA AC3, ENTPTR
-        LDA AC3, ENTCNT
-        LDA AC0, NEG1
-        ADD AC0, AC3
-        STA AC3, ENTCNT
-        MOV AC3, AC3, SNR
-        JMP CATDONE
         JMP CATLP
 CATDONE:JMP @PROMPTP
 
@@ -360,41 +361,20 @@ DO_RUN:
         STA AC0, TYPOS
 TY_LOOKUP:
         JSR @PTYPP
-        LDA AC2, RDBCBP
-        JSR @KRDBLKP
-        LDA AC3, ONE
-        SUBZ AC3, AC0
+        JSR @PKNAMEP
+        LDA AC1, LOOKCBP
+        LDA AC0, SEVEN
+        JSR @KSYSP
         MOV AC0, AC0, SNR
-        JMP TYFIND
+        JMP TYFOUND
+        LDA AC3, ONE
+        SUB# AC3, AC0, SNR
+        JMP TYNOTF
         LDA AC2, DSKERRP
         JSR @KPUTSP
         JMP @PROMPTP
 
-TYFIND: LDA AC3, DIRP
-        STA AC3, ENTPTR
-        LDA AC3, NENTS
-        STA AC3, ENTCNT
-TYFLP:  LDA AC2, ENTPTR
-        LDA AC0, 0,AC2
-        MOV AC0, AC0, SNR
-        JMP TYNOTF
-        JSR @TYCMPP
-        MOV AC0, AC0, SNR
-        JMP TYFOUND
-        JMP TYNEXT
-TYNEXT: LDA AC3, ENTPTR
-        LDA AC0, ENTWORDS
-        ADD AC0, AC3
-        STA AC3, ENTPTR
-        LDA AC3, ENTCNT
-        LDA AC0, NEG1
-        ADD AC0, AC3
-        STA AC3, ENTCNT
-        MOV AC3, AC3, SNR
-        JMP TYNOTF
-        JMP TYFLP
-
-TYFOUND:LDA AC2, ENTPTR
+TYFOUND:LDA AC2, DIRP
         LDA AC0, 5,AC2
         STA AC0, TYTYPE
         LDA AC0, 6,AC2
@@ -604,6 +584,28 @@ PTPPAD: LDA AC2, TYDPTR
         MOV AC0, AC0, SNR
         JMP @TYRETP
         JMP PTPPAD
+
+; Pack the ten parsed character words into five directory name words.
+PKNAME: STA AC3, TYRETP
+        LDA AC2, TYPENAMEP
+        LDA AC3, PACKEDP
+        LDA AC0, FIVE
+        STA AC0, TYCNT
+PKLP:   LDA AC0, 0,AC2
+        MOVS AC0, AC0
+        LDA AC1, 1,AC2
+        ADD AC1, AC0
+        STA AC0, 0,AC3
+        INC AC2, AC2
+        INC AC2, AC2
+        INC AC3, AC3
+        LDA AC0, TYCNT
+        LDA AC1, NEG1
+        ADD AC1, AC0, SZR
+        JMP PKMORE
+        JMP @TYRETP
+PKMORE: STA AC0, TYCNT
+        JMP PKLP
 
 ; TYCMP: Compare ENTPTR entry name with TYPENAME. AC0=0 if match.
 TYCMP:  STA AC3, TYRETP

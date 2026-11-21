@@ -86,5 +86,5 @@ explicitly protected.
 
 Additional tests are needed for interleaved cursors, I/O errors, malformed
 links, buffer bounds, and execution through disk boot and host-assisted modes.
-The boot loader and COMMAND do not yet use the API. Write allocation and
+The boot loader and COMMAND use the read-only API. Write allocation and
 crash-safe replacement require a separate design.

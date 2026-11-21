@@ -326,75 +326,28 @@ ONE3:    DW 1
 NEG12:   DW 0o177777
 
 ; ---- cold-start loader ----
-; LOADCMD reads the TC0 directory (block 1) into DIRBUF, finds the
-; COMMAND member, loads its blocks at the directory load address, and
+; LOADCMD looks up COMMAND through the filesystem extension, loads its
+; blocks at the directory load address, and
 ; jumps to the directory entry address.  Returns (to COLD, which halts)
 ; only on failure, after printing an error.
 
 LOADCMD:STA AC3, LCRET
-        LDA AC2, DSKCBP
-        JSR @P_RDBLK2
-        LDA AC3, ONE4
-        SUBZ AC3, AC0
+        LDA AC1, LLOOKUPP
+        JSR @P_FINDCMD
         MOV AC0, AC0, SNR
-        JMP LD_DIROK
+        JMP LD_FOUND
+        LDA AC3, ONE4
+        SUB# AC3, AC0, SNR
+        JMP LD_MISS
         LDA AC2, DSKERRP
         JSR @P_PUTS5
         JMP @LCRET
-LD_DIROK:
-        LDA AC2, DSKCBP
-        LDA AC0, 2,AC2
-        STA AC0, LENTPTR
-        LDA AC0, NENTS
-        STA AC0, LENTCNT
-LD_SCAN:LDA AC2, LENTPTR
-        LDA AC0, 0,AC2
-        MOV AC0, AC0, SNR
-        JMP LD_NEXT
-        LDA AC3, CMD0
-        SUBZ AC3, AC0
-        MOV AC0, AC0, SNR
-        JMP CHK1
-        JMP LD_NEXT
-CHK1:   LDA AC0, 1,AC2
-        LDA AC3, CMD1
-        SUBZ AC3, AC0
-        MOV AC0, AC0, SNR
-        JMP CHK2
-        JMP LD_NEXT
-CHK2:   LDA AC0, 2,AC2
-        LDA AC3, CMD2
-        SUBZ AC3, AC0
-        MOV AC0, AC0, SNR
-        JMP CHK3
-        JMP LD_NEXT
-CHK3:   LDA AC0, 3,AC2
-        LDA AC3, CMD3
-        SUBZ AC3, AC0
-        MOV AC0, AC0, SNR
-        JMP CHK4
-        JMP LD_NEXT
-CHK4:   LDA AC0, 4,AC2
-        LDA AC3, CMD4
-        SUBZ AC3, AC0
-        MOV AC0, AC0, SNR
-        JMP LD_FOUND
-        JMP LD_NEXT
-LD_NEXT:LDA AC3, LENTPTR
-        LDA AC0, ENTWORDS
-        ADD AC0, AC3
-        STA AC3, LENTPTR
-        LDA AC3, LENTCNT
-        LDA AC0, NEG13
-        ADD AC0, AC3
-        STA AC3, LENTCNT
-        MOV AC3, AC3, SNR
-        JMP LD_MISS
-        JMP LD_SCAN
 LD_MISS:LDA AC2, NOCMDP
         JSR @P_PUTS5
         JMP @LCRET
 LD_FOUND:
+        LDA AC0, LDIRP
+        STA AC0, LENTPTR
         LDA AC2, LENTPTR
         LDA AC0, 6,AC2
         STA AC0, LSTART
@@ -445,6 +398,10 @@ LD_BOK:  LDA AC3, LBLK
         JMP LD_BLP
 LD_GO:  JMP @LENTRY
 
+LLOOKUP: DW 0, CMDNAME, DIRBUF
+LLOOKUPP: DW LLOOKUP
+P_FINDCMD: DW 0o65400
+LDIRP:   DW DIRBUF
 LCRET:   DW 0
 LENTPTR: DW 0
 LENTCNT: DW 0

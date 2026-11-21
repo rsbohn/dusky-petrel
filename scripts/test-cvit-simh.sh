@@ -14,6 +14,7 @@ SNOVA="dusky/bin/Release/net9.0/Snova.dll"
 dotnet build dusky/Snova.csproj -c Release --nologo -v q
 
 dotnet "$SNOVA" abs simh/cvit-kernel-simh.asm "$TMPDIR/kernel.abs" --format simh-load
+dotnet "$SNOVA" abs sd/cvit-extension.asm "$TMPDIR/extension.abs" --format simh-load
 dotnet "$SNOVA" abs simh/cvit-command-simh.asm "$TMPDIR/command.abs" --format simh-load --start 3000
 dotnet "$SNOVA" abs sd/calendar.asm "$TMPDIR/calendar.abs" --format simh-load
 python3 scripts/abs2bin.py "$TMPDIR/command.abs" "$TMPDIR/command.bin"
@@ -30,6 +31,7 @@ python3 simh/convert-tc08-to-dsk.py "$TMPDIR/cvit-tc08.img" "$TMPDIR/cvit-dsk.im
 cat > "$TMPDIR/simh.ini" <<EOF
 attach dsk $TMPDIR/cvit-dsk.img
 load $TMPDIR/kernel.abs
+load $TMPDIR/extension.abs
 send after=100000,delay=20000 "STA\\rCAT\\rTYPE HELLO\\rRUN CALENDAR\\rFOO\\r\\004"
 go 1000
 EOF

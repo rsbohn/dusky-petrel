@@ -84,17 +84,17 @@ its second half contains `sd/cvit-boot.asm`. The bootstrap reads sectors
 AC0 = `0o12345`, then jumps to `0o1000`. The kernel image includes its
 directory buffer; unused space is zero-padded. All six sectors are reserved
 from filesystem allocation. RUN programs must preserve `0o65000`–`0o66377`.
-The extension currently contains only the probe; it does not yet implement
-filesystem services. Host-assisted `--console` and `--batch` modes assemble
+The extension provides read-only directory enumeration and lookup services;
+allocation and write services are not yet implemented. Host-assisted `--console` and `--batch` modes assemble
 and load the extension from `sd/cvit-extension.asm`. `scripts/test-dsk-boot.sh` exercises both emulators. The older
 Dusky `--console` and `--batch` modes still load the kernel from host source.
 
 ## Boot sequence
 
 1. **Cold start** (`0o1000`): Prints `cvit/Nova V0.1` banner via PUTS.
-2. **LOADCMD**: Reads TC0 directory (block 1) into DIRBUF at `0o2000`
-   via READBLK. Scans the 11-word directory entries for the name
-   `COMMAND` (5 packed words: `0o41517, 0o46515, 0o40516, 0o42040, 0o20040`).
+2. **LOADCMD**: Uses the extension's directory lookup to find `COMMAND`,
+   including in later directory blocks, and copies its entry to DIRBUF at
+   `0o2000`.
 3. **Load**: For the matching entry, reads `block count` blocks starting
    at `start block` into the `load address` (128 payload words per block).
    The COMMAND member is a flat word image: `[n1][n1 page-zero words][code...]`.
@@ -121,12 +121,11 @@ for end of chain; its other words are zero. The header's directory count
 records the initial number of directory blocks, which are placed before the
 member payloads by the builder.
 
-The kernel and COMMAND do not yet traverse this chain: they can see only the
-first nine members. In particular, place `COMMAND` in the first directory
-block so the current boot loader can find it. Tombstone encoding and runtime
-allocation are not implemented yet. Existing version 1 images can have a
-tenth member in the slot now reserved for the link; do not reinterpret them
-as version 2 without conversion.
+The boot loader and COMMAND traverse this chain using the extension's
+read-only filesystem API. A tombstone is indicated by bit 15 of entry word 11;
+enumeration and lookup skip such entries. Runtime allocation and tombstoning
+are not implemented yet. Version 1 images are unsupported and should be
+rebuilt with the current builder.
 
 ## COMMAND member format
 
