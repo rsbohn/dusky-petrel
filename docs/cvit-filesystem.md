@@ -38,6 +38,14 @@ padding after loading an image to satisfy this.
 | 1     | Directory (flat, single block) |
 | 2+    | File payload data |
 
+For a bootable DSK image, sector 0's normally unused second half holds the
+bootstrap, and sectors 1021–1023 (decimal) of the first platter hold the
+kernel. The image builder rejects filesystems that overlap those reserved
+sectors. The header's next-free-block value still describes filesystem data;
+any future disk allocator must also respect the reserved kernel sectors.
+The TC08-to-DSK converter alone does not produce a bootable image: use
+`scripts/build-image.sh`, which installs the bootstrap after conversion.
+
 ## Volume Header (Block 0)
 
 128 words. All values are 16-bit.

@@ -33,6 +33,16 @@ public sealed class NovaDskDevice : INovaIoDevice
 
     public int DeviceCode { get; }
 
+    // Reset controller registers without detaching the medium.
+    public void ResetDeviceState()
+    {
+        _sector = 0;
+        _memAddr = 0;
+        _status = 0;
+        _busy = false;
+        _done = false;
+    }
+
     public bool ExecuteIo(NovaIoOp op, ref ushort accumulator, out bool skip)
     {
         skip = false;

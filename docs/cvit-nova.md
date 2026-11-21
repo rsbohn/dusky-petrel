@@ -74,6 +74,16 @@ AC0 = selector on entry:
 Returns AC0 = 0 on success, nonzero on error (except getc, which returns
 the character).
 
+## Disk bootstrap
+
+`scripts/build-image.sh [output.dsk]` builds a self-contained bootable DSK
+image. SIMH `BOOT DSK` and Dusky `boot dsk` load sector 0 into page zero;
+its second half contains `sd/cvit-boot.asm`. The bootstrap reads the three
+reserved sectors 1021–1023 (decimal) into `0o1000`–`0o2377` and jumps to
+`0o1000`. The kernel image includes its directory buffer; unused space is
+zero-padded. `scripts/test-dsk-boot.sh` exercises both emulators. The older
+Dusky `--console` and `--batch` modes still load the kernel from host source.
+
 ## Boot sequence
 
 1. **Cold start** (`0o1000`): Prints `cvit/Nova V0.1` banner via PUTS.
@@ -178,6 +188,7 @@ which reloads COMMAND from disk; a program that halts ends the simulation.
 
 ## Status
 
+- [x] DSK bootstrap loads the kernel from a self-contained image on Dusky and SIMH
 - [x] Kernel jump table with GETC/PUTC/PUTS (vectors `0o1006`-`0o1010`)
 - [x] COMMAND uses kernel services; no duplicate device drivers
 - [x] Cold start loads COMMAND from disk; EOT returns to kernel HALT

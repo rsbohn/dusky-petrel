@@ -19,6 +19,7 @@ public class NovaMonitor
     private readonly NovaWatchdogDevice? _watchdog;
     private readonly Tc08? _tc08;
     private readonly DskImage? _dsk;
+    private readonly NovaDskDevice? _dskDevice;
     private readonly NovaRtcDevice? _rtc;
     private readonly NovaPaperTape? _paperTape;
     private readonly NovaLinePrinterDevice? _linePrinter;
@@ -49,13 +50,15 @@ public class NovaMonitor
         NovaLinePrinterDevice? linePrinter = null,
         NovaWebDevice? web = null,
         NovaJsonDevice? json = null,
-        DskImage? dsk = null)
+        DskImage? dsk = null,
+        NovaDskDevice? dskDevice = null)
     {
         _cpu = cpu;
         _tty = tty;
         _watchdog = watchdog;
         _tc08 = tc08;
         _dsk = dsk;
+        _dskDevice = dskDevice;
         _rtc = rtc;
         _paperTape = paperTape;
         _linePrinter = linePrinter;
@@ -259,6 +262,31 @@ public class NovaMonitor
         _breakpoints.Clear();
         _stackDepth = 0;
         Console.WriteLine($"CPU reset. PC={NovaCpu.FormatWord(_cpu.ProgramCounter)}");
+    }
+
+    private void Boot(string[] args)
+    {
+        if (args.Length != 1 || !args[0].Equals("dsk", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine("Usage: boot dsk");
+            return;
+        }
+        if (_dskDevice is null || _dsk?.GetPath(0) is null)
+        {
+            Console.WriteLine("Boot requires an attached DSK0 and DSK controller.");
+            return;
+        }
+
+        // Match SIMH's DSK bootstrap; retain media, but reset the CPU
+        // and controller so repeated boots always read sector zero into address zero.
+        _cpu.Reset();
+        _watchdog?.ResetDeviceState();
+        _dskDevice.ResetDeviceState();
+        _cpu.WriteMemory(0xFD, 26047); // 0o375: IORST
+        _cpu.WriteMemory(0xFE, 24656); // 0o376: NIOS DSK (0o60120)
+        _cpu.WriteMemory(0xFF, 255);   // 0o377: JMP 377
+        _cpu.SetProgramCounter(0xFD);
+        RunUntilHalt(Array.Empty<string>());
     }
 
     private void DumpRegisters()
@@ -1759,6 +1787,7 @@ LIMIT:  DW 0
         {
             ["help"] = "help [command]       Show command list or details",
             ["reset"] = "reset [addr]         Reset CPU and clear memory (start at optional addr)",
+            ["boot"] = "boot dsk             Reset and boot the attached DSK0 image",
             ["regs"] = "regs                 Display registers",
             ["exam"] = "exam <addr> [n]      Examine n words from addr",
             ["deposit"] = "deposit <addr> <v>  Store value at address",
@@ -1886,6 +1915,7 @@ LIMIT:  DW 0
         Console.WriteLine("CPU controls:");
         Console.WriteLine("  - cpu limit [n]     Set default run limit (0 = unlimited)");
         Console.WriteLine("  - reset [addr]      Reset CPU and clear memory (start at optional addr)");
+        Console.WriteLine("  - boot dsk          Reset and boot the attached DSK0 image");
         Console.WriteLine("  - run [n]           Run until HALT/breakpoint or n instructions");
         Console.WriteLine("  - step [n]          Step through n instructions");
         Console.WriteLine("  - trace [n]         Trace n instructions with registers");
@@ -1900,6 +1930,8 @@ LIMIT:  DW 0
         {
             ["help"] = stream => ShowHelp(CollectTokenArgs(stream, maxCount: 1)),
             ["reset"] = stream => Reset(CollectArgs(stream, maxCount: 1)),
+            ["boot"] = stream => Boot(CollectRemainingArgs(stream)),
+            ["cpu"] = stream => HandleCpu(CollectRemainingArgs(stream)),
             ["regs"] = _ => DumpRegisters(),
             ["r"] = _ => DumpRegisters(),
             ["exam"] = stream => Examine(CollectArgs(stream, maxCount: 2)),

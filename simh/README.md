@@ -53,7 +53,21 @@ python3 simh/convert-tc08-to-dsk.py cvit-tc08.img cvit-dsk.img
 The converter writes one block per sector (first 128 words copied, second
 half zeroed), minimum 1024 sectors = one 524288-byte platter.
 
-## Running (stage 1: no bootstrap yet)
+## Booting a current image
+
+Run `scripts/build-image.sh cvit-dsk.img`, then in SIMH:
+
+```text
+attach dsk cvit-dsk.img
+boot dsk
+```
+
+`scripts/run-simh.sh` builds and boots a temporary image. The bootstrap in
+sector 0 loads the kernel from reserved sectors 1021–1023. The plain converter
+alone does not install it. See `scripts/test-dsk-boot.sh` for cross-emulator
+acceptance coverage.
+
+## Historical stage 1 (manual kernel load)
 
 In SIMH Nova:
 
@@ -67,8 +81,8 @@ go 3000        ; prints "cvit/Nova COMMAND V0.1" and the ] prompt
 
 Verified 2026-10-28/29: `STA` -> `TC0: CVNV READY`, `CAT` lists the
 directory (`README.MD`), an unknown command answers `?WHAT`, and an EOT
-byte halts back to the `sim>` prompt. Do not use SIMH `BOOT DSK` for CVIT:
-its boot ROM layout (jump to 0o375) is not CVIT's.
+byte halts back to the `sim>` prompt. These historical instructions predate
+the bootable image builder described above.
 
 ## Not in this push
 
@@ -77,11 +91,49 @@ The assembled binaries (`kernel.abs`, `command.abs`) and disk images
 here; they are reproducible from the sources above. A built set from the
 verification run lives at `quack:/srv/share/dusky/`.
 
+## DSK bootstrap experiment
+
+To test SIMH's first-stage DSK boot independently of the CVIT kernel:
+
+```sh
+python3 scripts/mk-boot-test.py /tmp/cvit-boot-test.dsk
+nova
+```
+
+At the SIMH prompt:
+
+```text
+attach dsk /tmp/cvit-boot-test.dsk
+boot dsk
+examine pc
+examine 200
+examine 377
+```
+
+The expected stop is `HALT instruction, PC: 00201`; memory `200` contains
+`063077` (HALT) and `377` contains `000200` (JMP 200). All addresses and
+words here are octal. SIMH loads sector 0 into memory `0`–`377`; the
+on-disk jump replaces its bootstrap's loop at `377` and transfers control
+to the HALT at `200`. The image preserves an empty CVIT volume header in
+the first half of the sector, but it contains **no CVIT kernel or COMMAND**.
+It is a bootstrap experiment, not a bootable CVIT system. The regular TC08
+converter zeros the second half of each DSK sector, so it does not preserve
+this experiment's boot code.
+
+In the Dusky monitor, the same image can be tested with:
+
+```text
+dsk0 attach /tmp/cvit-boot-test.dsk
+boot dsk
+```
+
+Dusky should stop at `PC=000201` with `HALT=True`. Its boot command clears
+CPU memory and resets the DSK controller; it does not reset every device.
+
 ## Still open
 
-- Stage-2 DSK bootstrap: a small program that reads the kernel sectors
-  into 0o1000 so the kernel is booted from disk instead of LOADed.
-- Kernel cold start loading COMMAND from the directory into 0o3000.
+- Done: DSK bootstrap loads the kernel from disk; kernel cold start loads
+  COMMAND from the directory into 0o3000.
 - Done: return from RUN to COMMAND (kernel warm start reloads COMMAND),
   and Nova FOCAL (`RUN FOCAL`, `docs/focal.md`), tested on Dusky and SIMH
   by `scripts/test-focal.sh`.

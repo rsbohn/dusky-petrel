@@ -20,6 +20,7 @@ Numbers default to octal; use `0x` for hex.
 
 - `help` or `help <cmd>`
 - `reset [addr]`
+- `boot dsk` reset the CPU and DSK controller, then boot the attached DSK0 image
 - `go <addr|symbol> [n]` run from address or symbol (optional step limit)
 - `run [n]` run until HALT/breakpoint (optional step limit)
 - `step [n]`
@@ -52,6 +53,14 @@ of 256 little-endian 16-bit words per drive. Attach a DSK image with
 image, and `dsk status` to inspect the units. When a DSK image is attached to
 a unit, it takes precedence over TC08 media on that unit. This format is
 compatible with `convert-tc08-to-dsk.py` output and the SIMH CVIT image.
+
+Build a self-contained bootable DSK image with `scripts/build-image.sh [output.dsk]`
+(default: `cvit-dsk.img`). In the Dusky monitor, attach it with `dsk0 attach
+<path>` and run `boot dsk`. In SIMH, use `attach dsk <path>` then `boot dsk`.
+The bootable image includes the kernel, COMMAND and FOCAL. The existing Dusky
+`--console` launcher still loads the kernel from the host rather than booting
+it from the image. Set `cpu limit <n>` before booting an untested image to
+avoid running indefinitely. `scripts/test-dsk-boot.sh` tests both emulators.
 
 ## Emulator Notes
 

@@ -56,7 +56,7 @@ Console.CancelKeyPress += (_, e) =>
     Console.WriteLine("Break: CPU halted.");
 };
 
-var monitor = new NovaMonitor(cpu, tty, watchdog, tc08, rtc, paperTape, linePrinter, web, json, dsk);
+var monitor = new NovaMonitor(cpu, tty, watchdog, tc08, rtc, paperTape, linePrinter, web, json, dsk, dskDevice);
 NovaUnixConsole? unixConsole = null;
 var unixConsolePath = Environment.GetEnvironmentVariable("SNOVA_UNIX_CONSOLE");
 if (!string.IsNullOrWhiteSpace(unixConsolePath))
