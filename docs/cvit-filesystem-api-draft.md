@@ -1,12 +1,17 @@
 # CVIT filesystem API draft
 
 The contract below is not yet implemented in full. A vertical slice of
-selector 6 exists: it scans only the nine entries of directory block 1,
-using control-block words 0 (drive), 2 (index), and 3 (output pointer).
-It skips empty and tombstoned entries and returns 0 (entry), 1 (end), or 2
-(disk error). It does not validate the header, follow links, maintain a
-visited bitmap, or implement lookup. Do not use it as the complete API.
-`scripts/test-cvit-enum-slice.sh` exercises the first entry on both emulators.
+selector 6 exists: it scans linked version 2 directory blocks using
+control-block words 0 (drive), 1 (block), 2 (index), and 3 (output
+pointer). It skips empty and tombstoned entries and returns 0 (entry), 1
+(end), 2 (disk error), or 3 (invalid header, out-of-range link, or
+cycle). On initialization it checks the volume signature, version, and root
+block and clears the caller-owned bitmap. Directory blocks are marked in that
+bitmap before being visited. End and error states are terminal until the
+caller resets the cursor. Lookup is not yet implemented; do not use this as
+the complete API.
+`scripts/test-cvit-enum-slice.sh` exercises entries in both the first and
+second directory blocks, an invalid version, and a cycle on both emulators.
 
 ## Directory format
 
