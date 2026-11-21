@@ -1,6 +1,12 @@
 # CVIT filesystem API draft
 
-This is a proposed implementation contract, not an implemented API.
+The contract below is not yet implemented in full. A vertical slice of
+selector 6 exists: it scans only the nine entries of directory block 1,
+using control-block words 0 (drive), 2 (index), and 3 (output pointer).
+It skips empty and tombstoned entries and returns 0 (entry), 1 (end), or 2
+(disk error). It does not validate the header, follow links, maintain a
+visited bitmap, or implement lookup. Do not use it as the complete API.
+`scripts/test-cvit-enum-slice.sh` exercises the first entry on both emulators.
 
 ## Directory format
 
@@ -15,10 +21,10 @@ For version 2, propose marking a tombstone by setting bit 15 of entry word
 have that bit clear. A zero first name word is unused. Enumeration skips both
 unused entries and tombstones.
 
-The bootable DSK volume reserves blocks 1018 through 1023. Directory links
-must point to blocks 1 through 1017. Implementations must reject invalid or
-cyclic chains rather than looping forever. Block zero is the volume header,
-not a directory block.
+Both DSK volumes reserve blocks 1018 through 1023. Directory links must
+point to blocks 1 through 1017. Implementations must reject invalid or cyclic
+chains rather than looping forever. Block zero is the volume header, not a
+directory block.
 
 ## Read-only operations
 
@@ -47,10 +53,13 @@ interleaved. A single invocation is non-reentrant because it uses shared
 kernel scratch storage.
 
 On success the kernel copies one live entry to the output and advances the
-cursor. On end or error, output is unspecified. Callers must preserve the
-cursor block, entry index, and bitmap between calls; set block and entry index
-to zero to restart. The output area must not overlap the control block or
-kernel workspace.
+cursor. On end, the kernel sets cursor block to 0o177777; further calls return
+end without I/O. On error, it sets cursor block to 0o177776; further calls
+return invalid-directory status without I/O. The original call returns the
+specific disk or invalid-directory error. On end or error, output is
+unspecified. Callers must preserve the cursor block, entry index, and bitmap
+between calls; set block and entry index to zero to restart. The output area
+must not overlap the control block or kernel workspace.
 
 Lookup control block:
 

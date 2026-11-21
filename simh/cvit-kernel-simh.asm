@@ -98,6 +98,11 @@ SYSCALL:STA AC3, SYSRET
         ADD AC2, AC0
         MOV AC0, AC0, SNR
         JMP SYS_WRB
+        LDA AC0, SYSSEL
+        LDA AC2, NEG6
+        ADD AC2, AC0
+        MOV AC0, AC0, SNR
+        JMP SYS_ENUM
         LDA AC2, SVCERRP
         JSR @P_PUTS3
         LDA AC0, ONE
@@ -130,6 +135,10 @@ SYS_WRB:
         JSR @P_WRBLK
         JMP @SYSRET
 
+SYS_ENUM:
+        JSR @P_ENUM
+        JMP @SYSRET
+
 SYSSEL:  DW 0
 SYSRET:  DW 0
 NEG1:    DW 0o177777
@@ -137,6 +146,8 @@ NEG2:    DW 0o177776
 NEG3:    DW 0o177775
 NEG4:    DW 0o177774
 NEG5:    DW 0o177773
+NEG6:    DW 0o177772
+P_ENUM:  DW 0o65003
 ZERO:    DW 0
 ONE:     DW 1
 P_PUTC:  DW PUTC
