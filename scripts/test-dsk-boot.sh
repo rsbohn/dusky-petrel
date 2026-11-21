@@ -32,3 +32,23 @@ for emulator in dusky simh; do
     grep -Fq 'HALT' "$TMP/$emulator.clean" || { echo "FAIL: $emulator did not halt" >&2; exit 1; }
     echo "PASS: $emulator boot, commands, FOCAL, and warm return"
 done
+
+# A corrupt extension must halt before the kernel is entered.
+cp "$TMP/cvit.dsk" "$TMP/bad-extension.dsk"
+python3 - "$TMP/bad-extension.dsk" <<'PY'
+import sys
+with open(sys.argv[1], 'r+b') as f:
+    f.seek(1018 * 512)
+    f.write(b'\x3f\x66')  # HALT instead of the probe
+PY
+printf 'dsk0 attach %s/bad-extension.dsk\ncpu limit 2000000\nboot dsk\nquit\n' "$TMP" | \
+    dotnet dusky/bin/Release/net9.0/Snova.dll > "$TMP/bad-dusky.out"
+printf 'attach dsk %s/bad-extension.dsk\nboot dsk\nexit\n' "$TMP" > "$TMP/bad-simh.ini"
+"$SIMH_NOVA" "$TMP/bad-simh.ini" </dev/null > "$TMP/bad-simh.out"
+for emulator in dusky simh; do
+    grep -q 'HALT' "$TMP/bad-$emulator.out" || { echo "FAIL: $emulator did not halt on bad extension" >&2; exit 1; }
+    if grep -q 'cvit/Nova V0.1' "$TMP/bad-$emulator.out"; then
+        echo "FAIL: $emulator entered kernel with bad extension" >&2; exit 1
+    fi
+    echo "PASS: $emulator rejects bad extension"
+done

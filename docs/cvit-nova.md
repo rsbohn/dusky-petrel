@@ -78,10 +78,15 @@ the character).
 
 `scripts/build-image.sh [output.dsk]` builds a self-contained bootable DSK
 image. SIMH `BOOT DSK` and Dusky `boot dsk` load sector 0 into page zero;
-its second half contains `sd/cvit-boot.asm`. The bootstrap reads the three
-reserved sectors 1021–1023 (decimal) into `0o1000`–`0o2377` and jumps to
-`0o1000`. The kernel image includes its directory buffer; unused space is
-zero-padded. `scripts/test-dsk-boot.sh` exercises both emulators. The older
+its second half contains `sd/cvit-boot.asm`. The bootstrap reads sectors
+1021–1023 (decimal) into `0o1000`–`0o2377` and sectors 1018–1020 into
+`0o65000`–`0o66377`. It calls the extension probe at `0o65000`, requiring
+AC0 = `0o12345`, then jumps to `0o1000`. The kernel image includes its
+directory buffer; unused space is zero-padded. All six sectors are reserved
+from filesystem allocation. RUN programs must preserve `0o65000`–`0o66377`.
+The extension currently contains only the probe; it does not yet implement
+filesystem services. Host-assisted `--console` and `--batch` modes do not
+load the extension. `scripts/test-dsk-boot.sh` exercises both emulators. The older
 Dusky `--console` and `--batch` modes still load the kernel from host source.
 
 ## Boot sequence
