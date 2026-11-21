@@ -6,8 +6,10 @@ Usage:
 
 This is intentionally simple for bring-up:
 - block 0 is a volume header
-- block 1 is a flat directory
-- payload data starts at block 2
+- directory blocks start at block 1 and form a linked chain
+- each directory block has 9 member entries and one link entry
+- the link's word 6 is the next directory block, or 0 at the end
+- payload data follows the directory blocks
 - each physical TC08 block is 129 little-endian 16-bit words
 - only the first 128 words of each block are cvit/Nova payload
 """
@@ -23,7 +25,8 @@ from pathlib import Path
 WORDS_PER_BLOCK = 129
 DATA_WORDS_PER_BLOCK = 128
 DIR_ENTRY_WORDS = 12
-DIR_ENTRIES = DATA_WORDS_PER_BLOCK // DIR_ENTRY_WORDS
+DIR_ENTRIES = DATA_WORDS_PER_BLOCK // DIR_ENTRY_WORDS - 1
+LINK_OFFSET = DIR_ENTRIES * DIR_ENTRY_WORDS
 
 TYPE_TXT = 1
 TYPE_BIN = 2
@@ -91,12 +94,12 @@ def main() -> int:
     args = ap.parse_args()
 
     members = [parse_member(s) for s in args.members]
-    if len(members) > DIR_ENTRIES:
-        raise SystemExit(f"too many members for first directory block; max {DIR_ENTRIES}")
-
-    directory = [0] * DATA_WORDS_PER_BLOCK
+    directory_count = max(1, math.ceil(len(members) / DIR_ENTRIES))
+    directories = [[0] * DATA_WORDS_PER_BLOCK for _ in range(directory_count)]
+    for i in range(directory_count - 1):
+        directories[i][LINK_OFFSET + 6] = i + 2
     payload_blocks: list[list[int]] = []
-    next_block = 2
+    next_block = 1 + directory_count
 
     for index, (name, path, load, entry) in enumerate(members):
         typ, words = read_member_words(path)
@@ -111,7 +114,8 @@ def main() -> int:
             chunk = words[b * DATA_WORDS_PER_BLOCK : (b + 1) * DATA_WORDS_PER_BLOCK]
             payload_blocks.append(chunk)
 
-        off = index * DIR_ENTRY_WORDS
+        directory = directories[index // DIR_ENTRIES]
+        off = (index % DIR_ENTRIES) * DIR_ENTRY_WORDS
         directory[off : off + 5] = pack_name(name)
         directory[off + 5] = typ
         directory[off + 6] = start_block
@@ -124,16 +128,17 @@ def main() -> int:
     header = [0] * DATA_WORDS_PER_BLOCK
     header[0] = (ord("C") << 8) | ord("V")
     header[1] = (ord("N") << 8) | ord("V")
-    header[2] = 1          # format version
+    header[2] = 2          # chained-directory format version
     header[3] = 1          # directory start block
-    header[4] = 1          # directory block count
-    header[5] = 2          # first payload block
+    header[4] = directory_count
+    header[5] = 1 + directory_count # first payload block
     header[6] = next_block # next free block
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("wb") as f:
         write_block(f, header)
-        write_block(f, directory)
+        for directory in directories:
+            write_block(f, directory)
         for block in payload_blocks:
             write_block(f, block)
 

@@ -112,6 +112,22 @@ Dusky `--console` and `--batch` modes still load the kernel from host source.
 Failure paths: `?DSK` if the directory read fails; `?NOCMD` if no COMMAND
 entry is found. Both return to cold start, which HALTs.
 
+## Directory format transition
+
+`scripts/mk_cvit_nova.py` writes format version 2. Each 128-word directory
+payload contains nine 12-word member entries, followed by a 12-word link
+entry. Link entry word 6 contains the next directory block number, or zero
+for end of chain; its other words are zero. The header's directory count
+records the initial number of directory blocks, which are placed before the
+member payloads by the builder.
+
+The kernel and COMMAND do not yet traverse this chain: they can see only the
+first nine members. In particular, place `COMMAND` in the first directory
+block so the current boot loader can find it. Tombstone encoding and runtime
+allocation are not implemented yet. Existing version 1 images can have a
+tenth member in the slot now reserved for the link; do not reinterpret them
+as version 2 without conversion.
+
 ## COMMAND member format
 
 Built by `scripts/abs2bin.py` from a `simh-load` `.abs` file. The tool
