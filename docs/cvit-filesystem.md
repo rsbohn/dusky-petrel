@@ -39,10 +39,10 @@ padding after loading an image to satisfy this.
 | 2+    | File payload data |
 
 For a bootable DSK image, sector 0's normally unused second half holds the
-bootstrap, and sectors 1021–1023 (decimal) of the first platter hold the
-kernel. The image builder rejects filesystems that overlap those reserved
-sectors. The header's next-free-block value still describes filesystem data;
-any future disk allocator must also respect the reserved kernel sectors.
+bootstrap. Sectors 1015–1020 hold the extension and 1021–1023 hold the kernel.
+The image builder rejects filesystems that overlap sectors 1015–1023. The
+header's next-free-block value still describes filesystem data; the allocator
+must respect the reserved sectors.
 The TC08-to-DSK converter alone does not produce a bootable image: use
 `scripts/build-image.sh`, which installs the bootstrap after conversion.
 

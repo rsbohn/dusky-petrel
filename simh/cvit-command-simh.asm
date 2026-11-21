@@ -53,9 +53,18 @@ LINEP:   DW LINE
 DIRP:    DW 0o7600
 RDBCBP:  DW RDBCB
 STACBP:  DW STACB
-CURSORP: DW 0o7200
+CURSORP: DW 0o7000
+DUPCURP: DW 0o7120
+DUPBUFP: DW 0o7400
+DUPSCANP: DW DUPSCAN
+DUPMSGP: DW DUPMSG
+DUPRET:  DW 0
+DUPCNT:  DW 0
+DUPMATCH: DW 0
 LOOKCBP: DW LOOKCB
 PKNAMEP: DW PKNAME
+DORUNP:  DW DO_RUN
+DOTYPEP: DW DO_TYPE
 SIX:     DW 6
 SEVEN:   DW 7
 PACKEDP: DW PACKED
@@ -227,7 +236,7 @@ CHK_RUN:LDA AC2, LINEP
         LDA AC3, CHN
         SUBZ AC3, AC0
         MOV AC0, AC0, SNR
-        JMP DO_RUN
+        JMP @DORUNP
         JMP BAD
 CHK_TY: LDA AC2, LINEP
         LDA AC0, 1,AC2
@@ -248,7 +257,7 @@ CHK_TYPE:LDA AC2, LINEP
         LDA AC3, CHE
         SUBZ AC3, AC0
         MOV AC0, AC0, SNR
-        JMP DO_TYPE
+        JMP @DOTYPEP
         JMP BAD
 CHK_CA: LDA AC2, LINEP
         LDA AC0, 1,AC2
@@ -306,10 +315,73 @@ CATLP:  LDA AC1, CURSORP
 CATENTRY:
         LDA AC2, DIRP
         JSR @PNAMEP
-        LDA AC2, NLP
+        JSR @DUPSCANP
+        LDA AC3, ONE
+        SUB# AC3, AC0, SNR
+        JMP CATDUP
+        MOV AC0, AC0, SZR
+        JMP CATERR
+        JMP CATLINE
+CATDUP: LDA AC2, DUPMSGP
+        JSR @KPUTSP
+CATLINE:LDA AC2, NLP
         JSR @KPUTSP
         JMP CATLP
 CATDONE:JMP @PROMPTP
+CATERR: LDA AC2, DSKERRP
+        JSR @KPUTSP
+        JMP @PROMPTP
+
+; DUPSCAN counts matching live names with a second independent cursor.
+; Returns 0 for unique, 1 for duplicate, 2 for directory/I/O errors.
+DUPSCAN:STA AC3, DUPRET
+        LDA AC2, DUPCURP
+        LDA AC0, ZERO
+        STA AC0, 0,AC2
+        STA AC0, 1,AC2
+        STA AC0, 2,AC2
+        STA AC0, DUPMATCH
+        LDA AC0, DUPBUFP
+        STA AC0, 3,AC2
+DUPNEXT:LDA AC1, DUPCURP
+        LDA AC0, SIX
+        JSR @KSYSP
+        MOV AC0, AC0, SNR
+        JMP DUPENTRY
+        LDA AC1, ONE
+        SUB# AC1, AC0, SNR
+        JMP DUPUNIQ
+        LDA AC0, TWO
+        JMP @DUPRET
+DUPENTRY:
+        LDA AC2, DIRP
+        LDA AC3, DUPBUFP
+        LDA AC0, FIVE
+        STA AC0, DUPCNT
+DUPCMP: LDA AC0, 0,AC2
+        LDA AC1, 0,AC3
+        SUB# AC1, AC0, SZR
+        JMP DUPNEXT
+        INC AC2, AC2
+        INC AC3, AC3
+        LDA AC0, DUPCNT
+        LDA AC1, NEG1
+        ADD AC1, AC0, SZR
+        JMP DUPMORE
+        LDA AC0, DUPMATCH
+        INC AC0, AC0
+        STA AC0, DUPMATCH
+        LDA AC1, TWO
+        SUB# AC1, AC0, SNR
+        JMP DUPFOUND
+        JMP DUPNEXT
+DUPFOUND:
+        LDA AC0, ONE
+        JMP @DUPRET
+DUPMORE:STA AC0, DUPCNT
+        JMP DUPCMP
+DUPUNIQ:LDA AC0, ZERO
+        JMP @DUPRET
 
 DO_STA: LDA AC2, STACBP
         JSR @KRDBLKP
@@ -823,6 +895,8 @@ DSKERR:  DW 0o077
 VOLERR:  DW 0o077
          .TXT "VOL"
          DW 0o015, 0o012, 0
+DUPMSG:  .TXT " [DUP]"
+         DW 0
 CATHEAD: .TXT "DSK0:"
          DW 0o015, 0o012, 0
 STAMSG:  .TXT "DSK0: CVNV READY"

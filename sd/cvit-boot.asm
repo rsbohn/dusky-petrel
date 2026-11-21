@@ -1,6 +1,6 @@
 ; SIMH DSK boot sector stage: installed at sector 0 offsets 0o200..0o377.
 ; The image builder stores the low kernel in sectors 1021..1023 and
-; the high extension in sectors 1018..1020 (decimal).
+; the high extension in sectors 1015..1020 (decimal).
 ; BOOT DSK reads sector 0 into page zero, then executes its word at 0o377.
         ORG 0o200
 BOOT:   LDA AC0, SECTOR
@@ -35,7 +35,7 @@ WAIT:   SKPDN DSK
         STA AC0, SECTOR
         LDA AC0, EXTDEST
         STA AC0, DEST
-        LDA AC0, THREE
+        LDA AC0, SIX
         STA AC0, COUNT
         JMP BOOT
 EXTCHECK:
@@ -46,9 +46,9 @@ EXTCHECK:
         JMP @KERNEL
 EXTSIG: DW 0o12345
 PHASE:  DW 0
-EXTSECT: DW 0o1772              ; decimal 1018
+EXTSECT: DW 0o1767              ; decimal 1015
 EXTDEST: DW 0o65000
-THREE:   DW 3
+SIX:     DW 6
 SECTOR: DW 0o1775              ; decimal 1021
 DEST:   DW 0o1000
 SECTSIZE: DW 0o400

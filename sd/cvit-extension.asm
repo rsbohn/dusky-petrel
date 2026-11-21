@@ -131,15 +131,15 @@ EENTRY:  DW 0
 ECOUNT:  DW 0
 EDISK:   DW 0
 EDISKBLK: DW 1
-          DW EBUFFER
+          DW 0o77000
 EDISKP:  DW EDISK
 EREAD:   DW 0o1004
-EBUFP:   DW EBUFFER
+EBUFP:   DW 0o77000
 EONE:    DW 1
 ETWO:    DW 2
 ETHREE:  DW 3
-ELINKP:  DW EBUFFER+0o162
-ELIMIT:  DW 0o1772
+ELINKP:  DW 0o77162
+ELIMIT:  DW 0o1767
 ENINE:   DW 0o11
 EELEVEN: DW 0o13
 ETWELVE: DW 0o14
@@ -258,14 +258,19 @@ EFIFTEEN: DW 0o17
 LOOKUP: STA 3, LRET
         MOV 1,2
         LDA 0, 0,2
-        STA 0, LDRIVE
+        STA 0, LDRIVEVAL
         LDA 0, 1,2
         STA 0, LNAME
         LDA 0, 2,2
         STA 0, LOUTPUT
+        LDA 2, LCURSORP
+        LDA 0, LDRIVEVAL
+        STA 0, 0,2
         SUB 0,0
-        STA 0, LBLK
-        STA 0, LINDEX
+        STA 0, 1,2
+        STA 0, 2,2
+        LDA 0, LENTRYP
+        STA 0, 3,2
 LNEXT:  LDA 1, LCURSORP
         JSR @LENUM
         MOV 0,0,SZR
@@ -306,6 +311,7 @@ LCOPYMORE:
         STA 0, LCOUNT
         JMP LCOPY
 LRET: DW 0
+LDRIVEVAL: DW 0
 LNAME: DW 0
 LOUTPUT: DW 0
 LCOUNT: DW 0
@@ -313,23 +319,306 @@ LFIVE: DW 5
 LTWELVE: DW 0o14
 LNEG1: DW 0o177777
 LENUM: DW 0o65003
-LCURSORP: DW LCURSOR
-LENTRYP: DW LENTRY
+; The private cursor and entry use the kernel's reserved DIRBUF area.
+; Cursor: 0o2040..0o2143; entry: 0o2144..0o2157.
+LCURSORP: DW 0o2040
+LENTRYP: DW 0o2144
 
-; Private lookup cursor and entry buffer.
+; WRITEEXT: syscall 9, write a previously reserved contiguous extent.
+; AC1 = [drive, start block, source address, word length]. The caller owns
+; the reservation and must not pass a live extent. Status: 0 success,
+; 2 I/O error, 3 invalid arguments / out of range. Shared scratch is not
+; reentrant. The final filesystem block and each sector's second half are
+; zero-padded. Zero length writes one all-zero block.
         ORG 0o65600
-LCURSOR:
-LDRIVE: DW 0
-LBLK: DW 0
-LINDEX: DW 0
-        DW LENTRY
-        DW 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        DW 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        DW 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-        DW 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-LENTRY: DW 0,0,0,0,0,0,0,0,0,0,0,0
+WRITEEXT:
+        STA 3, WRET
+        MOV 1,2
+        LDA 0, 0,2
+        LDA 1, WTWO
+        SUBZ# 1,0,SZC
+        JMP WBAD
+        STA 0, WDISK
+        LDA 0, 1,2
+        LDA 1, WTWO
+        SUBZ# 1,0,SNC
+        JMP WBAD
+        LDA 1, WDISKLIMIT
+        SUBZ# 1,0,SZC
+        JMP WBAD
+        STA 0, WBLOCK
+        LDA 0, 2,2
+        LDA 1, WMEMLIMIT
+        SUBZ# 1,0,SZC
+        JMP WBAD
+        STA 0, WSOURCE
+        LDA 0, 3,2
+        LDA 1, WMEMPLUS
+        SUBZ# 1,0,SZC
+        JMP WBAD
+        STA 0, WREMAIN
+        LDA 1, WSOURCE
+        ADD 1,0
+        LDA 1, WMEMPLUS
+        SUBZ# 1,0,SZC
+        JMP WBAD
+        ; Calculate max(1, ceil(length / 128)) before writing anything.
+        LDA 0, WREMAIN
+        LDA 1, WROUND
+        ADD 1,0
+        MOVZR 0,0
+        MOVZR 0,0
+        MOVZR 0,0
+        MOVZR 0,0
+        MOVZR 0,0
+        MOVZR 0,0
+        MOVZR 0,0
+        MOV 0,0,SNR
+        INC 0,0
+        LDA 1, WBLOCK
+        ADD 1,0
+        LDA 1, WDISKPLUS
+        SUBZ# 1,0,SZC
+        JMP WBAD
+WNEXT:  LDA 2, WBUFFERP
+        LDA 0, W256
+        STA 0, WCOUNT
+        SUB 0,0
+WCLEAR: STA 0, 0,2
+        INC 2,2
+        DSZ WCOUNT
+        JMP WCLEAR
+        LDA 2, WBUFFERP
+        LDA 3, WSOURCE
+        LDA 0, W128
+        STA 0, WCOUNT
+WCOPY:  LDA 0, WREMAIN
+        MOV 0,0,SNR
+        JMP WFLUSH
+        LDA 0, 0,3
+        STA 0, 0,2
+        INC 2,2
+        INC 3,3
+        LDA 0, WREMAIN
+        LDA 1, WNEG1
+        ADD 1,0
+        STA 0, WREMAIN
+        DSZ WCOUNT
+        JMP WCOPY
+WFLUSH: STA 3, WSOURCE
+        LDA 2, WDISKP
+        JSR @WKWRITE
+        LDA 1, WONE
+        SUB# 1,0,SZR
+        JMP WIO
+        LDA 0, WREMAIN
+        MOV 0,0,SNR
+        JMP WOK
+        ISZ WBLOCK
+        JMP WNEXT
+        JMP WNEXT
+WOK:    SUB 0,0
+        JMP @WRET
+WBAD:   LDA 0, WTHREE
+        JMP @WRET
+WIO:    LDA 0, WTWO
+        JMP @WRET
+WRET: DW 0
+WSOURCE: DW 0
+WREMAIN: DW 0
+WCOUNT: DW 0
+WDISK: DW 0
+WBLOCK: DW 0
+        DW 0o77000
+WDISKP: DW WDISK
+WKWRITE: DW 0o1005
+WBUFFERP: DW 0o77000
+WONE: DW 1
+WTWO: DW 2
+WTHREE: DW 3
+W128: DW 0o200
+W256: DW 0o400
+WROUND: DW 0o177
+WNEG1: DW 0o177777
+WMEMLIMIT: DW 0o65000
+WMEMPLUS: DW 0o65001
+WDISKLIMIT: DW 0o1767
+WDISKPLUS: DW 0o1770
 
 ; Full-sector DMA scratch buffer.
-        ORG 0o66000
-EBUFFER: DW 0
+; The 256-word I/O buffer is at 0o77000, outside the loaded extension.
+
+; PUBLISH: syscall 10. AC1 -> [drive, pointer to 12-word entry].
+; Status: 0 published, 1 duplicate, 2 I/O error, 3 invalid input/volume,
+; 4 directory full. This first implementation supports free slots in the
+; existing linked directory chain; directory growth follows separately.
+        ORG 0o67000
+PUBLISH: JMP PRSTART
+PRREADP: DW PRREAD
+PRRET: DW 0
+PRONE: DW 1
+PRTHREE: DW 3
+PRCB: DW 0
+PRDRIVE: DW 0
+PRENTRY: DW 0
+PRBLOCK: DW 0
+PRINDEX: DW 0
+PRSLOTP: DW 0
+PRCOUNT: DW 0
+PRSTART:STA 3, PRRET
+        STA 1, PRCB
+        MOV 1,2
+        LDA 0, 0,2
+        LDA 1, PRONE
+        SUBZ# 1,0,SZC
+        JMP PRBAD
+        STA 0, PRDRIVE
+        LDA 0, 1,2
+        MOV 0,0,SNR
+        JMP PRBAD
+        STA 0, PRENTRY
+        ; Validate type is TXT, BIN, or SYS and name is nonempty.
+        MOV 0,2
+        LDA 0, 5,2
+        LDA 1, PRTHREE
+        SUBZ# 1,0,SZC
+        JMP PRBAD
+        LDA 2, PRENTRY
+        LDA 0, 0,2
+        MOV 0,0,SNR
+        JMP PRBAD
+        ; Read and validate the volume header.
+        SUB 0,0
+        STA 0, PRBLOCK
+        JSR @PRREADP
+        LDA 1, PRONE
+        SUB# 1,0,SZR
+        JMP PRIO
+        LDA 2, PRBUFP
+        LDA 0, 0,2
+        LDA 1, PRMAG1
+        SUB# 1,0,SZR
+        JMP PRBAD
+        LDA 0, 1,2
+        LDA 1, PRMAG2
+        SUB# 1,0,SZR
+        JMP PRBAD
+        LDA 0, 2,2
+        LDA 1, PRTWO
+        SUB# 1,0,SZR
+        JMP PRBAD
+        LDA 0, 3,2
+        MOV 0,0,SNR
+        JMP PRBAD
+        STA 0, PRBLOCK
+PRBLOCKLP:
+        JSR @PRREADP
+        LDA 1, PRONE
+        SUB# 1,0,SZR
+        JMP PRIO
+        LDA 0, PRZERO
+        STA 0, PRINDEX
+PRSLOT:
+        LDA 0, PRINDEX
+        LDA 1, PRNINE
+        SUBZ# 1,0,SZC
+        JMP PRLINK
+        ; Slot offset = index * 12.
+        MOV 0,2
+        MOVZL 0,0
+        ADD 2,0
+        MOVZL 0,0
+        MOVZL 0,0
+        LDA 2, PRBUFP
+        ADD 0,2
+        STA 2, PRSLOTP
+        LDA 0, 0,2
+        MOV 0,0,SNR
+        JMP PRSTORE
+        ; Entry occupies twelve words. A marked tombstone (word 11 high bit)
+        ; is also available for reuse.
+        LDA 2, PRSLOTP
+        LDA 1, PRELEVEN
+        ADD 1,2
+        LDA 0, 0,2
+        LDA 1, PRHIGH
+        AND 1,0,SZR
+        JMP PRSTORE
+        ISZ PRINDEX
+        JMP PRSLOT
+PRLINK: LDA 2, PRLINKP
+        LDA 0, 0,2
+        MOV 0,0,SNR
+        JMP PRFULL
+        STA 0, PRBLOCK
+        LDA 1, PRMAXBLOCK
+        SUBZ# 1,0,SZC
+        JMP PRBAD
+        JMP PRBLOCKLP
+PRSTORE:
+        LDA 2, PRENTRY
+        LDA 3, PRSLOTP
+        LDA 1, PRTWELVE
+        STA 1, PRCOUNT
+PRCOPY: LDA 0, 0,2
+        STA 0, 0,3
+        INC 2,2
+        INC 3,3
+        ISZ PRCOUNT
+        JMP PRCOPY
+        ; Write the directory block back after modifying its buffer.
+        LDA 2, PRWCBP
+        LDA 0, PRDRIVE
+        STA 0, 0,2
+        LDA 0, PRBLOCK
+        STA 0, 1,2
+        LDA 0, PRBUFP
+        STA 0, 2,2
+        LDA 1, PRWCBP
+        LDA 0, PRFIVE
+        JSR @PRSYS
+        LDA 1, PRONE
+        SUB# 1,0,SZR
+        JMP PRIO
+        SUB 0,0
+        JMP @PRRET
+PRBAD:  LDA 0, PRTHREE
+        JMP @PRRET
+PRFULL: LDA 0, PRFOUR
+        JMP @PRRET
+PRIO:   LDA 0, PRTWO
+        JMP @PRRET
+
+; Read one filesystem payload block into the extension sector buffer.
+PRREAD: STA 3, PRRRET
+        LDA 2, PRRCBP
+        LDA 0, PRDRIVE
+        STA 0, 0,2
+        LDA 0, PRBLOCK
+        STA 0, 1,2
+        LDA 0, PRBUFP
+        STA 0, 2,2
+        LDA 1, PRRCBP
+        LDA 0, PRFOUR
+        JSR @PRSYS
+        JMP @PRRRET
+PRSYS:  DW 0o1002
+PRRRET: DW 0
+PRRCBP: DW PRRCB
+PRWCBP: DW PRWCB
+PRBUFP: DW 0o77000
+PRRCB:  DW 0,0,0
+PRWCB:  DW 0,0,0
+PRTWO: DW 2
+PRFOUR: DW 4
+PRFIVE: DW 5
+PRNINE: DW 0o11
+PRTWELVE: DW 0o177764 ; -12 words for the ISZ copy loop
+PRELEVEN: DW 0o13
+PRHIGH: DW 0o100000
+PRZERO: DW 0
+PRMAXBLOCK: DW 0o1767
+PRMAG1: DW 0o41526
+PRMAG2: DW 0o47126
+PRLINKP: DW 0o66162
 

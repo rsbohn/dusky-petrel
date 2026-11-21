@@ -38,7 +38,7 @@ cp "$TMP/cvit.dsk" "$TMP/bad-extension.dsk"
 python3 - "$TMP/bad-extension.dsk" <<'PY'
 import sys
 with open(sys.argv[1], 'r+b') as f:
-    f.seek(1018 * 512)
+    f.seek(1015 * 512)
     f.write(b'\x3f\x66')  # HALT instead of the probe
 PY
 printf 'dsk0 attach %s/bad-extension.dsk\ncpu limit 2000000\nboot dsk\nquit\n' "$TMP" | \

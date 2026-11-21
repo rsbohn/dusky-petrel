@@ -108,6 +108,21 @@ SYSCALL:STA AC3, SYSRET
         ADD AC2, AC0
         MOV AC0, AC0, SNR
         JMP SYS_LOOKUP
+        LDA AC0, SYSSEL
+        LDA AC2, NEG8
+        ADD AC2, AC0
+        MOV AC0, AC0, SNR
+        JMP SYS_ALLOC
+        LDA AC0, SYSSEL
+        LDA AC2, NEG9
+        ADD AC2, AC0
+        MOV AC0, AC0, SNR
+        JMP SYS_WRITEEXT
+        LDA AC0, SYSSEL
+        LDA AC2, NEG10
+        ADD AC2, AC0
+        MOV AC0, AC0, SNR
+        JMP SYS_PUBLISH
         LDA AC2, SVCERRP
         JSR @P_PUTS3
         LDA AC0, ONE
@@ -148,8 +163,25 @@ SYS_LOOKUP:
         JSR @P_LOOKUP
         JMP @SYSRET
 
+SYS_ALLOC:
+        JSR @P_ALLOC
+        JMP @SYSRET
+
+SYS_WRITEEXT:
+        JSR @P_WRITEEXT
+        JMP @SYSRET
+
+SYS_PUBLISH:
+        LDA AC3, SYSRET
+        STA AC3, PUBOUTRET
+        JSR @P_PUBLISH
+        LDA AC3, PUBOUTRET
+        STA AC3, SYSRET
+        JMP @SYSRET
+
 SYSSEL:  DW 0
 SYSRET:  DW 0
+PUBOUTRET: DW 0
 NEG1:    DW 0o177777
 NEG2:    DW 0o177776
 NEG3:    DW 0o177775
@@ -157,6 +189,12 @@ NEG4:    DW 0o177774
 NEG5:    DW 0o177773
 NEG6:    DW 0o177772
 NEG7:    DW 0o177771
+NEG8:    DW 0o177770
+NEG9:    DW 0o177767
+NEG10:   DW 0o177766
+P_PUBLISH: DW 0o67000
+P_WRITEEXT: DW 0o65600
+P_ALLOC: DW FSALLOC
 P_ENUM:  DW 0o65003
 P_LOOKUP: DW 0o65400
 ZERO:    DW 0
@@ -434,11 +472,93 @@ DSKERR:  DW 0o077
 NOCMD:   DW 0o077
          .TXT "NOCMD"
          DW 0o015, 0o012, 0
-; Member-load control block, separate from DSKCB so the directory read
-; stays (drive 0, block 1, DIRBUF) across warm starts.
-LDCB:    DW 0
-         DW 0
-         DW 0
+; FSALLOC: reserve contiguous sectors by advancing the volume high-water
+; mark. AC1 = [drive, count, returned start]. Status: 0 success, 2 I/O,
+; 3 invalid control block/header, 4 no space. The operation is non-reentrant
+; and uses the extension's full-sector scratch buffer at 0o77000. A failed
+; header write can leave an allocation reserved; callers must not reuse it.
+        ORG 0o1610
+FSALLOC: STA 3, FARET
+        MOV 1,2
+        STA 2, FACALL
+        LDA 0, 0,2
+        LDA 1, FATWO
+        SUBZ# 1,0,SZC
+        JMP FABAD
+        STA 0, FADISK
+        LDA 0, 1,2
+        MOV 0,0,SNR
+        JMP FABAD
+        LDA 1, FALIMIT
+        SUBZ# 1,0,SZC
+        JMP FAFULL
+        STA 0, FACOUNT
+        LDA 2, FADISKP
+        JSR @FAREAD
+        LDA 1, FAONE
+        SUB# 1,0,SZR
+        JMP FAIO
+        LDA 2, FABUFP
+        LDA 0, 0,2
+        LDA 1, FAMAG1
+        SUB# 1,0,SZR
+        JMP FABAD
+        LDA 0, 1,2
+        LDA 1, FAMAG2
+        SUB# 1,0,SZR
+        JMP FABAD
+        LDA 0, 2,2
+        LDA 1, FATWO
+        SUB# 1,0,SZR
+        JMP FABAD
+        LDA 0, 6,2
+        LDA 1, FATWO
+        SUBZ# 1,0,SNC
+        JMP FABAD
+        STA 0, FASTART
+        LDA 1, FACOUNT
+        ADD 1,0
+        LDA 1, FALIMPLUS
+        SUBZ# 1,0,SZC
+        JMP FAFULL
+        STA 0, 6,2
+        LDA 2, FADISKP
+        JSR @FAWRITE
+        LDA 1, FAONE
+        SUB# 1,0,SZR
+        JMP FAIO
+        LDA 2, FACALL
+        LDA 0, FASTART
+        STA 0, 2,2
+        SUB 0,0
+        JMP @FARET
+FABAD:  LDA 0, FATHREE
+        JMP @FARET
+FAFULL: LDA 0, FAFOUR
+        JMP @FARET
+FAIO:   LDA 0, FATWO
+        JMP @FARET
+FARET:   DW 0
+FACALL:  DW 0
+FACOUNT: DW 0
+FASTART: DW 0
+FADISK:  DW 0, 0, 0o77000
+FADISKP: DW FADISK
+FAREAD:  DW READBLK
+FAWRITE: DW WRITEBLK
+FABUFP:  DW 0o77000
+FAONE:   DW 1
+FATWO:   DW 2
+FATHREE: DW 3
+FAFOUR:  DW 4
+FALIMIT: DW 0o1767          ; 1015: first reserved sector
+FALIMPLUS: DW 0o1770        ; 1016: first invalid end
+FAMAG1:  DW 0o41526
+FAMAG2:  DW 0o47126
+
+; Member-load control block, kept clear of FSALLOC at 0o1610.
+        ORG 0o1730
+LDCB:    DW 0, 0, 0
 
 ; Directory scratch buffer.  Kept clear of the kernel, COMMAND (0o3000+),
 ; and the 0o7600 block buffer.

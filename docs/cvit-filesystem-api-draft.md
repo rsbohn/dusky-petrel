@@ -28,8 +28,8 @@ For version 2, propose marking a tombstone by setting bit 15 of entry word
 have that bit clear. A zero first name word is unused. Enumeration skips both
 unused entries and tombstones.
 
-Both DSK volumes reserve blocks 1018 through 1023. Directory links must
-point to blocks 1 through 1017. Implementations must reject invalid or cyclic
+Both DSK volumes reserve blocks 1015 through 1023. Directory links must
+point to blocks 1 through 1014. Implementations must reject invalid or cyclic
 chains rather than looping forever. Block zero is the volume header, not a
 directory block.
 
@@ -82,9 +82,62 @@ must not overwrite caller buffers, the resident extension, or a running
 program. Shared sector buffers imply a non-reentrant implementation unless
 explicitly protected.
 
+## Contiguous block reservation
+
+Selector 8 reserves blocks by advancing the version 2 volume header's
+high-water mark. AC1 points to three words: drive (0 or 1), requested block
+count, and an output start block. AC0 returns 0 on success, 2 for an I/O
+error, 3 for an invalid drive, zero count, or invalid header, and 4 if the
+request does not fit before reserved block 1015. The output word is written
+only on success. The header's full 256-word sector is read and written so
+that the bootstrap in its second half is preserved. The operation uses the
+shared extension buffer and is non-reentrant.
+
+A failed header write may nevertheless have reached the disk. The caller must
+not assume the extent was free or reclaim it after an error; an interrupted
+operation may leak space. This service reserves space only: it does not write
+file payloads, create directory entries, tombstone old entries, or validate
+that pre-existing extents agree with the high-water mark. Use it only on a
+valid volume. `scripts/test-cvit-alloc.sh` tests persistence, disk-full
+handling, invalid headers and bootstrap preservation on both emulators.
+
+## Writing a reserved extent
+
+Selector 9 accepts a four-word control block: drive, starting block, source
+address, and length in words. It writes `max(1, ceil(length / 128))` sectors,
+using 128 payload words per sector. It zero-pads the last payload and the
+unused second half of every physical sector. A zero-length write writes one
+zeroed sector. AC0 returns 0 on success, 2 on I/O error, or 3 for invalid
+arguments or a range crossing into reserved sectors. Source data must end at
+or below `0o65000`, and must not overlap kernel-owned memory; the latter is a
+caller obligation, not a runtime check.
+
+The caller must supply an extent exclusively reserved for this write: this
+low-level service **does not verify ownership** and can overwrite live file
+data if given its blocks. A write error can leave an extent partially written;
+the reservation remains allocated. This operation is non-reentrant and uses
+the shared sector buffer. `scripts/test-cvit-write-extent.sh` checks padding,
+zero length, invalid source addresses, and disk boundaries on both emulators.
+
+Lookup's private cursor now uses `0o2040–0o2157` within the kernel's existing
+DIRBUF workspace. Callers must not overlap that workspace when invoking it.
+
+## Directory entry publication (planned)
+
+Selector 10 (planned) publishes one complete 12-word entry. AC1 points to
+`[drive, entry_pointer]`. Status is 0 success, 1 duplicate live name, 2 I/O
+error, 3 invalid drive/volume/entry, or 4 directory full. It traverses the
+linked directory and rejects a duplicate live name. Unused and tombstoned
+slots may be reused. If every directory block is full, it reserves and
+initializes a new block before linking it from the old tail. The caller writes
+the payload before publication; failure may leak reserved blocks, but must not
+expose an entry whose payload is incomplete. Replacing a live name is
+separate: a safe replacement protocol must keep the old entry usable until the
+new file is complete.
+
 ## Required validation before adoption
 
 Additional tests are needed for interleaved cursors, I/O errors, malformed
 links, buffer bounds, and execution through disk boot and host-assisted modes.
-The boot loader and COMMAND use the read-only API. Write allocation and
-crash-safe replacement require a separate design.
+The boot loader and COMMAND use the read-only API. Directory updates,
+file publication, and crash-safe replacement require further implementation.

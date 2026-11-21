@@ -178,13 +178,13 @@ static bool LoadExtension(NovaCpu cpu)
     {
         var result = new NovaAssembler().AssembleFile(FindSource("sd/cvit-extension.asm"));
         if (!result.Success || result.Words.Count == 0 ||
-            result.Words.Any(w => w.Address < 0x6A00 || w.Address >= 0x6D00) ||
-            !result.Words.Any(w => w.Address == 0x6A00)) // 0o65000..0o66377
+            result.Words.Any(w => w.Address < 0x6A00 || w.Address >= 0x7000) ||
+            !result.Words.Any(w => w.Address == 0x6A00)) // 0o65000..0o67777
         {
             Console.Error.WriteLine("Unable to load CVIT kernel extension: assembly failed or address out of range.");
             return false;
         }
-        for (var address = 0x6A00; address < 0x6D00; address++)
+        for (var address = 0x6A00; address < 0x7000; address++)
             cpu.WriteMemory((ushort)address, 0);
         foreach (var word in result.Words)
             cpu.WriteMemory(word.Address, word.Value);

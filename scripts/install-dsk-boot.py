@@ -7,9 +7,10 @@ from pathlib import Path
 from abs2flat import parse_abs
 
 SECTOR_WORDS = 256
-EXTENSION_SECTOR = 1018  # Three sectors immediately before the low kernel.
+EXTENSION_SECTOR = 1015  # Six sectors immediately before the low kernel.
 KERNEL_SECTOR = 1021  # Last three sectors of the first 1024-sector platter.
 EXTENSION_START = 0o65000
+EXTENSION_CAPACITY = 6 * SECTOR_WORDS
 KERNEL_START = 0o1000
 KERNEL_CAPACITY = 3 * SECTOR_WORDS
 
@@ -34,8 +35,8 @@ kernel = parse_abs(args.kernel_abs)
 if KERNEL_START not in kernel or any(a < KERNEL_START or a >= KERNEL_START + KERNEL_CAPACITY for a in kernel):
     raise SystemExit("error: kernel does not fit the three reserved sectors at 0o1000")
 extension = parse_abs(args.extension_abs)
-if EXTENSION_START not in extension or any(a < EXTENSION_START or a >= EXTENSION_START + KERNEL_CAPACITY for a in extension):
-    raise SystemExit("error: extension does not fit the three reserved sectors at 0o65000")
+if EXTENSION_START not in extension or any(a < EXTENSION_START or a >= EXTENSION_START + EXTENSION_CAPACITY for a in extension):
+    raise SystemExit("error: extension does not fit the six reserved sectors at 0o65000")
 for address, value in boot.items():
     struct.pack_into("<H", image, address * 2, value)
 # Clear padding so stale contents cannot become kernel data.
@@ -44,7 +45,7 @@ image[start:start + KERNEL_CAPACITY * 2] = bytes(KERNEL_CAPACITY * 2)
 for address, value in kernel.items():
     struct.pack_into("<H", image, start + (address - KERNEL_START) * 2, value)
 start = EXTENSION_SECTOR * SECTOR_WORDS * 2
-image[start:start + KERNEL_CAPACITY * 2] = bytes(KERNEL_CAPACITY * 2)
+image[start:start + EXTENSION_CAPACITY * 2] = bytes(EXTENSION_CAPACITY * 2)
 for address, value in extension.items():
     struct.pack_into("<H", image, start + (address - EXTENSION_START) * 2, value)
 args.image.write_bytes(image)

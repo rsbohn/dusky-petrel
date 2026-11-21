@@ -88,3 +88,33 @@ swap, TYOUT SZR/SNR, now PTYP SNR/SZR). The pattern is always the same:
 both directions assemble and the wrong one looks right. When a skip-guard
 is meant to *continue* on a condition, trace one in-range and one
 out-of-range value through it before moving on.
+
+## 2026-11-21 — Expanding the extension is a whole-memory-map change
+
+**Symptom.** The enlarged disk image built, but boot stopped with `?DSK`;
+host-assisted FOCAL testing also produced no transcript. A first publish
+acceptance test then hung or reported untouched result words.
+
+**The hunt.** The extension occupies several coordinated ranges, not one
+constant: the boot sector's sector/count/destination, the image installer's
+sector range and capacity, the filesystem allocator's reserved-sector
+boundary, and Dusky's host-assisted extension loader. The kernel also had
+`LDCB` assembled at `0o1611`, while `FSALLOC`'s `ORG 0o1610` overlaid it.
+Separately, the publisher exposed ordinary Nova assembly hazards: a direct
+call beyond the short addressing range, treating a buffer address as a
+pointer-to-pointer, using `ISZ` with a positive count, and confusing decimal
+syscall 10 with octal assembly literal `10`.
+
+**Fix.** Reserve sectors 1015–1020 for six extension sectors, keep the
+kernel at 1021–1023, update all loader and allocator limits, move the I/O
+buffer to `0o77000`, and relocate `LDCB` outside the `FSALLOC` region. Add
+small end-to-end tests for boot, high-memory DSK reads, and publication on
+both Dusky and SIMH. The publisher test caught the pointer and loop errors;
+the boot and FOCAL tests caught the loader-range mismatch.
+
+**Lesson.** When changing a memory or disk map, search and update every
+producer, loader, allocator, and host-assisted path together. Compare the
+installed words to the assembled image, then test the actual boot path. For
+Nova assembly, a successful assembly is not evidence that a short-address
+reference, indirect pointer, skip condition, or `ISZ` loop does what was
+intended; step through it and assert its effects in a runnable test.
