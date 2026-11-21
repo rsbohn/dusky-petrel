@@ -8,10 +8,12 @@ pointer). It skips empty and tombstoned entries and returns 0 (entry), 1
 cycle). On initialization it checks the volume signature, version, and root
 block and clears the caller-owned bitmap. Directory blocks are marked in that
 bitmap before being visited. End and error states are terminal until the
-caller resets the cursor. Lookup is not yet implemented; do not use this as
-the complete API.
-`scripts/test-cvit-enum-slice.sh` exercises entries in both the first and
-second directory blocks, an invalid version, and a cycle on both emulators.
+caller resets the cursor. Selector 7 performs name lookup using a private
+cursor and propagates enumeration errors. Caller buffer overlap is not yet
+validated, so callers must obey the buffer restrictions below.
+`scripts/test-cvit-enum-slice.sh` exercises enumeration and lookup on both
+emulators, including chained directories, missing and tombstoned members,
+invalid versions, and cycles.
 
 ## Directory format
 
@@ -33,8 +35,8 @@ directory block.
 
 ## Read-only operations
 
-Propose adding selectors 6 (enumerate) and 7 (lookup) to the existing kernel
-syscall vector at 0o1002. AC1 points to a caller-owned control block. AC0
+Selectors 6 (enumerate) and 7 (lookup) are available through the existing
+kernel syscall vector at 0o1002. AC1 points to a caller-owned control block. AC0
 returns 0 for success, 1 for end/not found, 2 for disk error, or 3 for an
 invalid volume or directory. Other registers are clobbered.
 
@@ -82,9 +84,7 @@ explicitly protected.
 
 ## Required validation before adoption
 
-The cursor layout and syscall selectors above have not been implemented or
-validated. Test both disk-boot and host-assisted execution on Dusky and SIMH,
-including unsupported versions, multi-block version 2 directories, skipped
-tombstones and empty entries, missing names, I/O errors, invalid links and
-cycles. Update the boot loader and COMMAND only after the API passes these
-tests. Write allocation and crash-safe replacement require a separate design.
+Additional tests are needed for interleaved cursors, I/O errors, malformed
+links, buffer bounds, and execution through disk boot and host-assisted modes.
+The boot loader and COMMAND do not yet use the API. Write allocation and
+crash-safe replacement require a separate design.

@@ -69,3 +69,42 @@ PY
 grep -Eq '4016:[[:space:]]+000003' "$TMP/simh-cycle.out"
 grep -Eq '4017:[[:space:]]+000003' "$TMP/simh-cycle.out"
 echo 'PASS: syscall 6 detects a directory cycle on Dusky and SIMH'
+
+# Lookup a member in the second block, a missing member, and a cyclic chain.
+python3 - "$TMP/missing.asm" <<'PY'
+from pathlib import Path
+import sys
+source = Path('sd/cvit-lookup-test.asm').read_text()
+Path(sys.argv[1]).write_text(source.replace('0o34440', '0o35440'))
+Path(sys.argv[1]).with_name('first.asm').write_text(source.replace('0o34440', '0o30040'))
+PY
+check_lookup() {
+    local label=$1 disk=$2 source=$3 status=$4 expected=${5:-034440}
+    dotnet "$SNOVA" abs "$source" "$TMP/lookup.abs" --format simh-load >/dev/null
+    printf 'dsk0 attach %s\nasm simh/cvit-kernel-simh.asm\nasm sd/cvit-extension.asm\nasm %s\nrun 100000\nexam 4010 1\nexam 4023 1\nquit\n' "$disk" "$source" | dotnet "$SNOVA" > "$TMP/lookup-dusky.out"
+    grep -Eq "004010: +$status" "$TMP/lookup-dusky.out"
+    if [[ $status == 000000 ]]; then grep -Eq "004023: +$expected" "$TMP/lookup-dusky.out"; fi
+    printf 'attach dsk %s\nload %s/cvit-kernel-simh.abs\nload %s/cvit-extension.abs\nload %s/lookup.abs\ngo 4000\nex 4010\nex 4023\nexit\n' "$disk" "$TMP" "$TMP" "$TMP" > "$TMP/lookup.ini"
+    python3 - "$SIMH_NOVA" "$TMP/lookup.ini" "$TMP/lookup-simh.out" <<'PY'
+import subprocess, sys
+with open(sys.argv[3], 'w') as output:
+    subprocess.run([sys.argv[1], sys.argv[2]], stdin=subprocess.DEVNULL,
+                   stdout=output, stderr=subprocess.STDOUT, check=True, timeout=15)
+PY
+    grep -Eq "4010:[[:space:]]+$status" "$TMP/lookup-simh.out"
+    if [[ $status == 000000 ]]; then grep -Eq "4023:[[:space:]]+$expected" "$TMP/lookup-simh.out"; fi
+    echo "PASS: lookup $label on Dusky and SIMH"
+}
+check_lookup 'first-block member' "$TMP/chain.dsk" "$TMP/first.asm" 000000 030040
+check_lookup 'second-block member' "$TMP/chain.dsk" sd/cvit-lookup-test.asm 000000
+check_lookup 'missing member' "$TMP/chain.dsk" "$TMP/missing.asm" 000001
+check_lookup 'cycle' "$TMP/cycle.dsk" "$TMP/missing.asm" 000003
+check_lookup 'invalid volume' "$TMP/bad-header.dsk" sd/cvit-lookup-test.asm 000003
+cp "$TMP/chain.dsk" "$TMP/tombstone.dsk"
+python3 - "$TMP/tombstone.dsk" <<'PY'
+import struct, sys
+with open(sys.argv[1], 'r+b') as image:
+    image.seek(2 * 512 + 11 * 2)
+    image.write(struct.pack('<H', 0x8000))
+PY
+check_lookup 'tombstoned member' "$TMP/tombstone.dsk" sd/cvit-lookup-test.asm 000001

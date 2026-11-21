@@ -251,7 +251,85 @@ EFOUR: DW 4
 ESIXTYFOUR: DW 0o100
 EFIFTEEN: DW 0o17
 
-; Full-sector DMA scratch buffer follows the extension code.
+; LOOKUP: syscall 7. AC1 = [drive, packed-name pointer, output pointer].
+; Return 0 found, 1 not found, 2 I/O error, 3 invalid volume/directory.
+; Uses a private enumeration cursor; not reentrant.
         ORG 0o65400
+LOOKUP: STA 3, LRET
+        MOV 1,2
+        LDA 0, 0,2
+        STA 0, LDRIVE
+        LDA 0, 1,2
+        STA 0, LNAME
+        LDA 0, 2,2
+        STA 0, LOUTPUT
+        SUB 0,0
+        STA 0, LBLK
+        STA 0, LINDEX
+LNEXT:  LDA 1, LCURSORP
+        JSR @LENUM
+        MOV 0,0,SZR
+        JMP @LRET
+        LDA 2, LNAME
+        LDA 3, LENTRYP
+        LDA 0, LFIVE
+        STA 0, LCOUNT
+LCMP:   LDA 0, 0,2
+        LDA 1, 0,3
+        SUB# 1,0,SZR
+        JMP LNEXT
+        INC 2,2
+        INC 3,3
+        LDA 0, LCOUNT
+        LDA 1, LNEG1
+        ADD 1,0,SZR
+        JMP LCMPMORE
+        JMP LMATCH
+LCMPMORE:
+        STA 0, LCOUNT
+        JMP LCMP
+LMATCH: LDA 2, LENTRYP
+        LDA 3, LOUTPUT
+        LDA 0, LTWELVE
+        STA 0, LCOUNT
+LCOPY:  LDA 0, 0,2
+        STA 0, 0,3
+        INC 2,2
+        INC 3,3
+        LDA 0, LCOUNT
+        LDA 1, LNEG1
+        ADD 1,0,SZR
+        JMP LCOPYMORE
+        SUB 0,0
+        JMP @LRET
+LCOPYMORE:
+        STA 0, LCOUNT
+        JMP LCOPY
+LRET: DW 0
+LNAME: DW 0
+LOUTPUT: DW 0
+LCOUNT: DW 0
+LFIVE: DW 5
+LTWELVE: DW 0o14
+LNEG1: DW 0o177777
+LENUM: DW 0o65003
+LCURSORP: DW LCURSOR
+LENTRYP: DW LENTRY
+
+; Private lookup cursor and entry buffer.
+        ORG 0o65600
+LCURSOR:
+LDRIVE: DW 0
+LBLK: DW 0
+LINDEX: DW 0
+        DW LENTRY
+        DW 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+        DW 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+        DW 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+        DW 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+LENTRY: DW 0,0,0,0,0,0,0,0,0,0,0,0
+
+; Full-sector DMA scratch buffer.
+        ORG 0o66000
 EBUFFER: DW 0
 
