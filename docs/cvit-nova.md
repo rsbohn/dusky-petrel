@@ -85,8 +85,8 @@ AC0 = `0o12345`, then jumps to `0o1000`. The kernel image includes its
 directory buffer; unused space is zero-padded. All six sectors are reserved
 from filesystem allocation. RUN programs must preserve `0o65000`–`0o66377`.
 The extension currently contains only the probe; it does not yet implement
-filesystem services. Host-assisted `--console` and `--batch` modes do not
-load the extension. `scripts/test-dsk-boot.sh` exercises both emulators. The older
+filesystem services. Host-assisted `--console` and `--batch` modes assemble
+and load the extension from `sd/cvit-extension.asm`. `scripts/test-dsk-boot.sh` exercises both emulators. The older
 Dusky `--console` and `--batch` modes still load the kernel from host source.
 
 ## Boot sequence

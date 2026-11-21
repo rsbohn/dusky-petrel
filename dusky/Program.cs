@@ -91,6 +91,11 @@ if (consoleMode)
         return 1;
     }
 
+    if (!LoadExtension(cpu))
+    {
+        unixConsole?.Dispose();
+        return 1;
+    }
     cpu.SetProgramCounter(0x200); // 0o1000: kernel cold start loads COMMAND from the DSK
     Console.WriteLine("CVIT console active. Enter sends CR; Ctrl+D sends EOT to halt.");
     var runner = Task.Run(() =>
@@ -131,6 +136,11 @@ else if (batchMode)
         unixConsole?.Dispose();
         return 1;
     }
+    if (!LoadExtension(cpu))
+    {
+        unixConsole?.Dispose();
+        return 1;
+    }
     using var stdin = Console.OpenStandardInput();
     using var ms = new MemoryStream();
     stdin.CopyTo(ms);
@@ -162,9 +172,35 @@ return 0;
 
 // The CVIT kernel source: relative to the working directory, else found by
 // walking up from the build output (dusky/bin/<config>/<tfm>/) to the repo.
-static string FindKernelSource()
+static bool LoadExtension(NovaCpu cpu)
 {
-    const string relative = "simh/cvit-kernel-simh.asm";
+    try
+    {
+        var result = new NovaAssembler().AssembleFile(FindSource("sd/cvit-extension.asm"));
+        if (!result.Success || result.Words.Count == 0 ||
+            result.Words.Any(w => w.Address < 0x6A00 || w.Address >= 0x6D00) ||
+            !result.Words.Any(w => w.Address == 0x6A00)) // 0o65000..0o66377
+        {
+            Console.Error.WriteLine("Unable to load CVIT kernel extension: assembly failed or address out of range.");
+            return false;
+        }
+        for (var address = 0x6A00; address < 0x6D00; address++)
+            cpu.WriteMemory((ushort)address, 0);
+        foreach (var word in result.Words)
+            cpu.WriteMemory(word.Address, word.Value);
+        return true;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Unable to load CVIT kernel extension: {ex.Message}");
+        return false;
+    }
+}
+
+static string FindKernelSource() => FindSource("simh/cvit-kernel-simh.asm");
+
+static string FindSource(string relative)
+{
     if (File.Exists(relative))
         return relative;
     for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
