@@ -16,17 +16,19 @@ import pathlib, re, struct, subprocess, sys
 root, simh, snova = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 original = (root / 'base.dsk').read_bytes()
 base = struct.unpack_from('<H', original, 12)[0]
-for case in ('normal', 'full', 'invalid', 'zero-count', 'oversize'):
+for case in ('normal', 'full', 'invalid', 'wrapped-start', 'zero-count', 'oversize'):
     source = bytearray(original)
     if case == 'full': struct.pack_into('<H', source, 12, 1014)
     if case == 'invalid': struct.pack_into('<H', source, 4, 1)
+    if case == 'wrapped-start': struct.pack_into('<H', source, 12, 0xffff)
+    invalid = case in ('invalid', 'wrapped-start')
     start = struct.unpack_from('<H', source, 12)[0]
     expected = ((0, start, 0, start + 1) if case == 'normal' else
                 (0, start, 4, start) if case == 'full' else
-                (3, 0xffff, 3, 0xffff) if case == 'invalid' else
+                (3, 0xffff, 3, 0xffff) if invalid else
                 (3 if case == 'zero-count' else 4, 0xffff, 0, start))
     next_block = start + (3 if case == 'normal' else 1 if case == 'full' else
-                          0 if case == 'invalid' else 2)
+                          0 if invalid else 2)
     count = '0' if case == 'zero-count' else '177777' if case == 'oversize' else None
     for emulator in ('dusky', 'simh'):
         disk = root / f'{case}-{emulator}.dsk'

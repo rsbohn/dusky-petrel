@@ -57,6 +57,41 @@ erases the last character.
 
 Group and line arguments are expressions (`DO N`, `GOTO 1+.1`).
 
+### Local program files
+
+`LOCAL READ FOO` and `LOCAL WRITE FOO` take one bare CVIT member name:
+1–10 characters (`A`–`Z`, `0`–`9`, `.`, `-`, `_`), case-insensitive.
+Spell out both command words and enter the command on its own at the `*`
+prompt, not on a numbered line or in a semicolon-separated command list.
+Bare `WRITE` still lists program lines.
+
+`LOCAL READ` resets the program, variables, execution state, and output
+format before looking up the file. This is destructive: a failed load
+leaves an empty session. A syntax error does not reset it.
+
+`LOCAL READ` loads a FOCAL binary member from the default CVIT volume.
+It validates and copies the numbered lines in one pass, without running
+any of them. A failure discards any partially copied program.
+
+`LOCAL WRITE` saves only numbered lines, leaving the running session
+unchanged. It creates a new member; it does not overwrite an existing one.
+A duplicate name or full directory is rejected before allocating blocks.
+A write interrupted after allocation may leave reserved blocks unused.
+Rebuild older bootable images with `scripts/build-image.sh` to get the
+kernel that supports these commands.
+
+#### FOCAL member format (version 1)
+
+Use a CVIT `TYPE_BIN` member. The payload begins with the 16-bit words
+`0x464F`, `0x434C` (`FO`, `CL`), and `1` (version). Then comes one record
+per line: the decimal line number as an integer (`01.10` is `110`), the
+nonempty text as printable ASCII (one character per word, no more than
+72), and a zero word. Records must be in strictly increasing order.
+A zero line-number word ends the program, including an empty program.
+The directory length includes the header and final zero, but not sector
+padding. Load and entry addresses are ignored. Binary members in this
+format can also be put on the disk via `scripts/mk_cvit_nova.py`.
+
 ## Expressions
 
 Operators, from highest precedence: `^` (integer power), unary `-` / `+`,
@@ -99,6 +134,12 @@ return to the `*` prompt.
 | `?MEM` | Program text full |
 | `?VAR` | Variable table full (512 variables) |
 | `?STK` | Nesting too deep |
+| `?NOFILE` | Local member not found |
+| `?FILE` | Wrong member type, invalid extent or format, or program too large |
+| `?DSK` | Disk I/O or volume/directory error |
+| `?EXISTS` | A live member already has that name |
+| `?FULL` | Not enough free disk blocks to save |
+| `?DIRFULL` | No free directory slot |
 
 ## Numbers
 
@@ -117,10 +158,12 @@ restoring divide) using only Nova 1210 instructions.
 | `0o0040`-`0o0377` | constants, globals and routine pointers |
 | `0o1000`-`0o2377` | cvit/Nova kernel and directory buffer (left intact) |
 | `0o6000`- | interpreter (load and entry address) |
+| `0o27775`–`0o27777` | disk save header, immediately before program text |
 | `0o30000`-`0o55577` | program text, one character per word |
 | `0o56000`-`0o57777` | software stack |
 | `0o60000`-`0o63777` | variable table, 4 words per variable |
 | `0o64000` / `0o64200` | input line / `ASK` buffers |
+| `0o70000`–`0o70377` | FOCAL disk read sector buffer (256 words) |
 
 ## Building
 
@@ -143,5 +186,5 @@ the expected file from Dusky).
 ## Not yet
 
 - Transcendental functions (`FSIN`, `FCOS`, `FEXP`, `FLOG`, `FATN`) and `FRAN`
-- `MODIFY`, and loading or saving programs on the CVIT disk
+- `MODIFY` and overwriting an existing member with `LOCAL WRITE`
 - Breaking out of a running program (Ctrl-C) without halting the machine

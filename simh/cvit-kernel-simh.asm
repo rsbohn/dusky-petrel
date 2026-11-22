@@ -123,6 +123,11 @@ SYSCALL:STA AC3, SYSRET
         ADD AC2, AC0
         MOV AC0, AC0, SNR
         JMP SYS_PUBLISH
+        LDA AC0, SYSSEL
+        LDA AC2, NEG11
+        ADD AC2, AC0
+        MOV AC0, AC0, SNR
+        JMP SYS_PUBCHECK
         LDA AC2, SVCERRP
         JSR @P_PUTS3
         LDA AC0, ONE
@@ -172,16 +177,15 @@ SYS_WRITEEXT:
         JMP @SYSRET
 
 SYS_PUBLISH:
-        LDA AC3, SYSRET
-        STA AC3, PUBOUTRET
         JSR @P_PUBLISH
-        LDA AC3, PUBOUTRET
-        STA AC3, SYSRET
+        JMP @SYSRET
+
+SYS_PUBCHECK:
+        JSR @P_PUBCHECK
         JMP @SYSRET
 
 SYSSEL:  DW 0
 SYSRET:  DW 0
-PUBOUTRET: DW 0
 NEG1:    DW 0o177777
 NEG2:    DW 0o177776
 NEG3:    DW 0o177775
@@ -192,7 +196,9 @@ NEG7:    DW 0o177771
 NEG8:    DW 0o177770
 NEG9:    DW 0o177767
 NEG10:   DW 0o177766
+NEG11:   DW 0o177765
 P_PUBLISH: DW 0o67000
+P_PUBCHECK:DW 0o67001
 P_WRITEEXT: DW 0o65600
 P_ALLOC: DW FSALLOC
 P_ENUM:  DW 0o65003
@@ -515,6 +521,9 @@ FSALLOC: STA 3, FARET
         LDA 1, FATWO
         SUBZ# 1,0,SNC
         JMP FABAD
+        LDA 1, FALIMPLUS
+        SUBZ# 1,0,SZC
+        JMP FABAD
         STA 0, FASTART
         LDA 1, FACOUNT
         ADD 1,0
@@ -557,7 +566,7 @@ FAMAG1:  DW 0o41526
 FAMAG2:  DW 0o47126
 
 ; Member-load control block, kept clear of FSALLOC at 0o1610.
-        ORG 0o1730
+        ORG 0o1750
 LDCB:    DW 0, 0, 0
 
 ; Directory scratch buffer.  Kept clear of the kernel, COMMAND (0o3000+),

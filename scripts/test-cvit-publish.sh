@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Acceptance test for selector 10 directory publication followed by lookup.
-# Fails until the publication syscall is implemented.
+# Test directory preflight, publication, and duplicate rejection.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 SIMH_NOVA=${SIMH_NOVA:-nova}
@@ -21,22 +20,24 @@ for emulator in ('dusky', 'simh'):
     if emulator == 'dusky':
         commands = (f'dsk0 attach {disk}\nasm simh/cvit-kernel-simh.asm\n'
                     'asm sd/cvit-extension.asm\nasm sd/cvit-publish-test.asm\n'
-                    'go 4000 100000\nexam 4210 6\nquit\n')
+                    'go 4000 100000\nexam 4210 6\nexam 4216 3\nquit\n')
         proc = subprocess.run(['dotnet', snova], input=commands, text=True,
                               capture_output=True, timeout=20, check=True)
         match = re.search(r'004210:\s+([0-7]+)\s+([0-7]+)\s+([0-7]+)\s+([0-7]+)\s+([0-7]+)\s+([0-7]+)', proc.stdout)
-        values = tuple(int(v, 8) for v in match.groups()) if match else None
+        checks = re.search(r'004216:\s+([0-7]+)\s+([0-7]+)\s+([0-7]+)', proc.stdout)
+        values = tuple(int(v, 8) for v in match.groups() + checks.groups()) if match and checks else None
     else:
         ini = root / 'publish.ini'
         ini.write_text(f'attach dsk {disk}\nload {root}/kernel.abs\n'
                        f'load {root}/extension.abs\nload {root}/test.abs\n'
-                       'go 4000\nex 4210-4215\ndetach dsk\nexit\n')
+                       'go 4000\nex 4210-4220\ndetach dsk\nexit\n')
         proc = subprocess.run([simh, str(ini)], stdin=subprocess.DEVNULL,
                               text=True, capture_output=True, timeout=20, check=True)
-        found = re.findall(r'^421[0-5]:\s+([0-7]+)', proc.stdout, re.M)
-        values = tuple(int(v, 8) for v in found) if len(found) == 6 else None
-    # publish success, lookup success, TXT type, start, count, length.
-    expected = (0, 0, 1, 2, 1, 1)
+        found = re.findall(r'^(?:421[0-7]|4220):\s+([0-7]+)', proc.stdout, re.M)
+        values = tuple(int(v, 8) for v in found) if len(found) == 9 else None
+    # Publish and lookup succeed; original TXT metadata is unchanged.
+    # Preflight succeeds without publishing, then a duplicate is refused.
+    expected = (0, 0, 1, 2, 1, 1, 0, 1, 1)
     if values != expected:
         raise SystemExit(f'{emulator}: publication/lookup values {values} != {expected}\n{proc.stdout}\n{proc.stderr}')
     print(f'PASS: directory publication and lookup on {emulator}')

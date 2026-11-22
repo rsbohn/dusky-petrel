@@ -122,22 +122,27 @@ zero length, invalid source addresses, and disk boundaries on both emulators.
 Lookup's private cursor now uses `0o2040–0o2157` within the kernel's existing
 DIRBUF workspace. Callers must not overlap that workspace when invoking it.
 
-## Directory entry publication (planned)
+## Directory entry publication
 
-Selector 10 (planned) publishes one complete 12-word entry. AC1 points to
-`[drive, entry_pointer]`. Status is 0 success, 1 duplicate live name, 2 I/O
-error, 3 invalid drive/volume/entry, or 4 directory full. It traverses the
-linked directory and rejects a duplicate live name. Unused and tombstoned
-slots may be reused. If every directory block is full, it reserves and
-initializes a new block before linking it from the old tail. The caller writes
-the payload before publication; failure may leak reserved blocks, but must not
-expose an entry whose payload is incomplete. Replacing a live name is
-separate: a safe replacement protocol must keep the old entry usable until the
-new file is complete.
+Selectors 10 (publish) and 11 (preflight) take AC1 = `[drive, entry_pointer]`,
+where the entry has 12 words. Status is 0 success, 1 duplicate live name,
+2 I/O error, 3 invalid drive/volume/entry, or 4 directory full. Both reject
+a duplicate live name anywhere in the linked directory. If the name is
+absent, they validate the chain before selecting the first unused or
+tombstoned slot. They do not add directory blocks.
+
+Selector 11 checks the name, type, live flag, and availability of a slot;
+it does not reserve space or write anything. The caller can preflight,
+reserve and write its payload, then pass the complete entry to selector 10.
+Selector 10 checks again and publishes the directory entry. It does not
+verify ownership or completeness of the payload; that is the caller's
+responsibility. A write failure after allocation may leak reserved blocks.
+Replacing an existing live name is not supported.
 
 ## Required validation before adoption
 
 Additional tests are needed for interleaved cursors, I/O errors, malformed
 links, buffer bounds, and execution through disk boot and host-assisted modes.
-The boot loader and COMMAND use the read-only API. Directory updates,
-file publication, and crash-safe replacement require further implementation.
+The boot loader and COMMAND use the read-only API. FOCAL uses the write
+API for create-only saves. Directory growth and crash-safe replacement
+require further implementation.

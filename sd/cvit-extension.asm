@@ -450,66 +450,69 @@ WDISKPLUS: DW 0o1770
 
 ; PUBLISH: syscall 10. AC1 -> [drive, pointer to 12-word entry].
 ; Status: 0 published, 1 duplicate, 2 I/O error, 3 invalid input/volume,
-; 4 directory full. This first implementation supports free slots in the
-; existing linked directory chain; directory growth follows separately.
+; 4 directory full. Selector 11 uses the same CB and validation but only
+; checks whether publication is possible, without writing or reserving.
+; Only existing linked directory blocks are used; no directory growth.
         ORG 0o67000
-PUBLISH: JMP PRSTART
+PUBLISH: JMP PRPUB
+PUBCHECK:JMP PRCHECK
+PRPUB:  SUB 0,0
+        JMP PRSTART
+PRCHECK:LDA 0, PRONE
+        JMP PRSTART
 PRREADP: DW PRREAD
-PRRET: DW 0
 PRONE: DW 1
 PRTHREE: DW 3
-PRCB: DW 0
-PRDRIVE: DW 0
 PRENTRY: DW 0
-PRBLOCK: DW 0
 PRINDEX: DW 0
 PRSLOTP: DW 0
 PRCOUNT: DW 0
+PRLOOKP: DW LOOKUP
+PRLOOKCBP:DW PRLOOKCB
+PRLOOKCB:DW 0,0,PRFOUND
+PRFOUND: DW 0,0,0,0,0,0,0,0,0,0,0,0
+PRROOT: DW EROOT
+PRSCAN: DW 0
+PRRET:  DW 0
 PRSTART:STA 3, PRRET
-        STA 1, PRCB
+        STA 0, PRSCAN
         MOV 1,2
         LDA 0, 0,2
-        LDA 1, PRONE
+        LDA 1, PRTWO
         SUBZ# 1,0,SZC
         JMP PRBAD
         STA 0, PRDRIVE
+        STA 0, PRLOOKCB
         LDA 0, 1,2
         MOV 0,0,SNR
         JMP PRBAD
         STA 0, PRENTRY
-        ; Validate type is TXT, BIN, or SYS and name is nonempty.
+        STA 0, PRLOOKCB+1
+        ; Validate type is TXT, BIN, or SYS and the entry is live.
         MOV 0,2
         LDA 0, 5,2
-        LDA 1, PRTHREE
+        MOV 0,0,SNR
+        JMP PRBAD
+        LDA 1, PRFOUR
         SUBZ# 1,0,SZC
         JMP PRBAD
-        LDA 2, PRENTRY
         LDA 0, 0,2
         MOV 0,0,SNR
         JMP PRBAD
-        ; Read and validate the volume header.
-        SUB 0,0
-        STA 0, PRBLOCK
-        JSR @PRREADP
+        LDA 0, 13,2
+        LDA 1, PRHIGH
+        AND 1,0,SZR
+        JMP PRBAD
+        ; Reject a duplicate even if an earlier slot is free. An absent
+        ; name means LOOKUP validated the complete chain, including EROOT.
+        LDA 1, PRLOOKCBP
+        JSR @PRLOOKP
+        MOV 0,0,SNR
+        JMP PRDUP
         LDA 1, PRONE
         SUB# 1,0,SZR
-        JMP PRIO
-        LDA 2, PRBUFP
-        LDA 0, 0,2
-        LDA 1, PRMAG1
-        SUB# 1,0,SZR
-        JMP PRBAD
-        LDA 0, 1,2
-        LDA 1, PRMAG2
-        SUB# 1,0,SZR
-        JMP PRBAD
-        LDA 0, 2,2
-        LDA 1, PRTWO
-        SUB# 1,0,SZR
-        JMP PRBAD
-        LDA 0, 3,2
-        MOV 0,0,SNR
-        JMP PRBAD
+        JMP @PRRET          ; propagate I/O or malformed directory
+        LDA 0, @PRROOT
         STA 0, PRBLOCK
 PRBLOCKLP:
         JSR @PRREADP
@@ -555,7 +558,9 @@ PRLINK: LDA 2, PRLINKP
         SUBZ# 1,0,SZC
         JMP PRBAD
         JMP PRBLOCKLP
-PRSTORE:
+PRSTORE:LDA 0, PRSCAN
+        MOV 0,0,SZR
+        JMP PROK
         LDA 2, PRENTRY
         LDA 3, PRSLOTP
         LDA 1, PRTWELVE
@@ -566,21 +571,15 @@ PRCOPY: LDA 0, 0,2
         INC 3,3
         ISZ PRCOUNT
         JMP PRCOPY
-        ; Write the directory block back after modifying its buffer.
-        LDA 2, PRWCBP
-        LDA 0, PRDRIVE
-        STA 0, 0,2
-        LDA 0, PRBLOCK
-        STA 0, 1,2
-        LDA 0, PRBUFP
-        STA 0, 2,2
-        LDA 1, PRWCBP
-        LDA 0, PRFIVE
-        JSR @PRSYS
+        ; Write the entire directory sector back, preserving other words.
+        LDA 2, PRDISKP
+        JSR @PRWRITE
         LDA 1, PRONE
         SUB# 1,0,SZR
         JMP PRIO
-        SUB 0,0
+PROK:   SUB 0,0
+        JMP @PRRET
+PRDUP:  LDA 0, PRONE
         JMP @PRRET
 PRBAD:  LDA 0, PRTHREE
         JMP @PRRET
@@ -590,35 +589,22 @@ PRIO:   LDA 0, PRTWO
         JMP @PRRET
 
 ; Read one filesystem payload block into the extension sector buffer.
-PRREAD: STA 3, PRRRET
-        LDA 2, PRRCBP
-        LDA 0, PRDRIVE
-        STA 0, 0,2
-        LDA 0, PRBLOCK
-        STA 0, 1,2
-        LDA 0, PRBUFP
-        STA 0, 2,2
-        LDA 1, PRRCBP
-        LDA 0, PRFOUR
-        JSR @PRSYS
-        JMP @PRRRET
-PRSYS:  DW 0o1002
-PRRRET: DW 0
-PRRCBP: DW PRRCB
-PRWCBP: DW PRWCB
+PRREAD: LDA 2, PRDISKP
+        JMP @PRRDV
+PRRDV:  DW 0o1004
+PRWRITE:DW 0o1005
+PRDISKP:DW PRDRIVE
+PRDRIVE:DW 0
+PRBLOCK:DW 0
+        DW 0o77000
 PRBUFP: DW 0o77000
-PRRCB:  DW 0,0,0
-PRWCB:  DW 0,0,0
-PRTWO: DW 2
+PRTWO:  DW 2
 PRFOUR: DW 4
-PRFIVE: DW 5
 PRNINE: DW 0o11
 PRTWELVE: DW 0o177764 ; -12 words for the ISZ copy loop
 PRELEVEN: DW 0o13
 PRHIGH: DW 0o100000
 PRZERO: DW 0
 PRMAXBLOCK: DW 0o1767
-PRMAG1: DW 0o41526
-PRMAG2: DW 0o47126
-PRLINKP: DW 0o66162
+PRLINKP: DW 0o77162
 

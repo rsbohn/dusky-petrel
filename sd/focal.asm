@@ -14,7 +14,7 @@
 ; (GETC 0o1006, PUTC 0o1007).  QUIT at the * prompt, or EOT (Ctrl-D)
 ; anywhere, returns to COMMAND through the kernel warm start (0o1001).
 ;
-; Commands: ASK COMMENT DO ERASE FOR GOTO IF QUIT RETURN SET TYPE WRITE
+; Commands: ASK COMMENT DO ERASE FOR GOTO IF LOCAL QUIT RETURN SET TYPE WRITE
 ; Functions: FABS FSGN FITR FSQT
 ; Numbers: 32-bit DG-style floating point (sign, excess-64 hex exponent,
 ; 24-bit hex-normalized fraction), done in software.
@@ -247,11 +247,7 @@ SCP:    LDA 0, 0,2
         INC 3,3
         ISZ SCNT
         JMP SCP
-        LDA 2, PPBASE       ; empty program
-        STA 2, PEND
-        SUB 0,0
-        STA 0, 0,2
-        STA 0, VCNT
+        JSR RESET
         LDA 2, BANP
         JSR @XPUTS
         JMP @XMAIN
@@ -259,6 +255,28 @@ SCP:    LDA 0, 0,2
 SPZP:   DW PZIMG
 SCNT:   DW 0
 BANP:   DW BANNER
+
+; Fresh interpreter state, shared by startup and an accepted LOCAL READ.
+; Leave console framing (COL, LASTCR) and the loader workspace intact.
+; The counts and pointers discard old storage without clearing its contents.
+RESET:  LDA 2, PPBASE
+        STA 2, PEND
+        SUB 0,0
+        STA 0, 0,2          ; empty program marker
+        STA 0, VCNT
+        STA 0, TXP
+        STA 0, CLP
+        STA 0, QUITF
+        STA 0, RETF
+        STA 0, SMODE
+        STA 0, SGLO
+        LDA 0, PSTK
+        STA 0, SP
+        LDA 0, K8
+        STA 0, FMTW
+        LDA 0, K4
+        STA 0, FMTD
+        JMP 0,3
 
 ; ---- RET: pop return address from the software stack and jump ----
 ; Clobbers AC3 only, so AC0-AC2 can carry results back.
@@ -289,10 +307,15 @@ MAIN:   LDA 0, PSTK
         JMP MDIRECT
         JSR @XLNENT
         JMP MAIN
-MDIRECT:SUB 0,0
+MDIRECT:LDA 1, MLOCALC
+        SUB# 0,1,SNR
+        JMP @MLOCALP
+        SUB 0,0
         SUB 1,1
         JSR @XRUNSEG
         JMP MAIN
+MLOCALC:DW 0o114            ; L
+MLOCALP:DW CLOCAL
 
 ; ---- ERR: JSR @XERR followed by DW message ----
 ERR:    LDA 2, 0,3
@@ -2973,6 +2996,436 @@ SQG1:   DW 0
 SQC:    DW 0
 
 ; =====================================================================
+; LOCAL is a standalone prompt command. Parse before changing any state.
+; CLMODE = 0 for READ, 1 for WRITE. CLNAME holds five packed CVIT words
+; in static workspace, independent of the input buffer and FOCAL stack.
+CLOCAL: LDA 2, CLLP
+        JSR CLWORD
+        JMP CLCMD
+        JSR @XSKSP
+        LDA 2, CLRP
+        JSR CLWORD
+        JMP CLTRYW
+        SUB 0,0
+        JMP CLMODEST
+CLTRYW: LDA 2, CLWP
+        JSR CLWORD
+        JMP CLSYN
+        LDA 0, K1
+CLMODEST:
+        STA 0, CLMODE
+        JSR @XSKSP
+        MOV 0,0,SNR
+        JMP CLSYN
+        LDA 2, CLCHARP
+        STA 2, CLDST
+        LDA 1, K10
+        NEG 1,1
+        STA 1, CLCNT
+CLCHAR: MOV 0,0,SNR
+        JMP CLEND
+        LDA 1, CSP
+        SUB# 0,1,SNR
+        JMP CLEND
+        JSR @XISALN
+        JMP CLPUNCT
+        JMP CLSTORE
+CLPUNCT:LDA 1, CDOT
+        SUB# 0,1,SNR
+        JMP CLSTORE
+        LDA 1, CMINUS
+        SUB# 0,1,SNR
+        JMP CLSTORE
+        LDA 1, CLUS
+        SUB# 0,1,SZR
+        JMP CLSYN
+CLSTORE:LDA 2, CLDST
+        STA 0, 0,2
+        ISZ CLDST
+        ISZ CLCNT
+        JMP CLMORE
+        JSR @XADVC
+        JMP CLEND
+CLMORE: JSR @XADVC
+        JMP CLCHAR
+CLEND:  JSR @XSKSP
+        MOV 0,0,SZR
+        JMP CLSYN
+        LDA 0, CLCNT
+        MOV 0,0,SNR
+        JMP CLPACK
+        LDA 2, CLDST
+        LDA 0, CSP
+CLPAD:  STA 0, 0,2
+        INC 2,2
+        ISZ CLCNT
+        JMP CLPAD
+CLPACK: LDA 2, CLCHARP
+        LDA 3, CLNAMEP
+        LDA 0, CLNEG5
+        STA 0, CLCNT
+CLPKLP: LDA 0, 0,2
+        MOVS 0,0
+        LDA 1, 1,2
+        ADD 1,0
+        STA 0, 0,3
+        INC 2,2
+        INC 2,2
+        INC 3,3
+        ISZ CLCNT
+        JMP CLPKLP
+        LDA 0, CLMODE
+        MOV 0,0,SZR
+        JMP @CLSVP
+CLREAD: JSR @CLRESETP       ; one-way door; never resume the old session
+        JMP @CLLOADP
+CLCMD:  JSR @XERR
+        DW EMCMD
+CLSYN:  JSR @XERR
+        DW EMSYN
+
+; Compare the word at TXP with the string at AC2. Skip on a match
+; followed by a space or NUL, advancing TXP only on success.
+CLWORD: STA 3, CLRT
+        LDA 3, TXP
+CLWLP:  LDA 1, 0,2
+        MOV 1,1,SNR
+        JMP CLWEND
+        LDA 0, 0,3
+        SUB# 1,0,SZR
+        JMP @CLRT
+        INC 2,2
+        INC 3,3
+        JMP CLWLP
+CLWEND: LDA 0, 0,3
+        MOV 0,0,SNR
+        JMP CLWOK
+        LDA 1, CSP
+        SUB# 0,1,SZR
+        JMP @CLRT
+CLWOK:  STA 3, TXP
+        ISZ CLRT
+        JMP @CLRT
+
+CLRT:   DW 0
+CLMODE: DW 0
+CLDST:  DW 0
+CLCNT:  DW 0
+CLUS:   DW 0o137            ; underscore
+CLNEG5: DW 0o177773
+CLLP:   DW CLL
+CLRP:   DW CLR
+CLWP:   DW CLW
+CLRESETP:DW RESET
+CLLOADP: DW FLDLOAD
+CLSVP:  DW FSVSAVE
+CLCHARP:DW CLCHARS
+CLNAMEP:DW CLNAME
+CLL:    .TXT "LOCAL"
+        DW 0
+CLR:    .TXT "READ"
+        DW 0
+CLW:    .TXT "WRITE"
+        DW 0
+CLCHARS:DW 0,0,0,0,0,0,0,0,0,0
+CLNAME: DW 0,0,0,0,0
+
+; LOCAL WRITE: create only. Stage the three-word header immediately below
+; PPBASE, so the header and the live arena form one contiguous source.
+FSVSAVE:LDA 2, FSVNAMEP
+        LDA 3, FSVENTP
+        LDA 0, CLNEG5
+        STA 0, FSVCOUNT
+FSVNAME:LDA 0, 0,2
+        STA 0, 0,3
+        INC 2,2
+        INC 3,3
+        ISZ FSVCOUNT
+        JMP FSVNAME
+        LDA 2, FSVENTP
+        LDA 0, K2          ; TYPE_BIN
+        STA 0, 5,2
+        SUB 0,0
+        STA 0, 10,2        ; load and entry addresses unused
+        STA 0, 11,2
+        STA 0, 13,2        ; live entry, no flags
+        LDA 1, FSVPP
+        LDA 0, FSVELEVEN   ; check duplicate and directory space first
+        JSR @FSVSYS
+        MOV 0,0,SZR
+        JMP FSVSTATUS
+        LDA 2, PPBASE
+        LDA 1, K3
+        SUB 1,2
+        STA 2, FSVSRC
+        LDA 3, FSVMAGP
+        LDA 0, 0,3
+        STA 0, 0,2
+        LDA 0, 1,3
+        STA 0, 1,2
+        LDA 0, K1
+        STA 0, 2,2         ; version
+        LDA 0, PEND
+        SUB 2,0
+        INC 0,0            ; include the final program marker
+        STA 0, FSVLEN
+        LDA 1, K177
+        ADD 1,0
+        LDA 1, K200
+        JSR @XDIV16        ; ceil(length / 128)
+        STA 0, FSVCNT
+        LDA 1, FSVAP
+        LDA 0, K8          ; reserve the extent
+        JSR @FSVSYS
+        MOV 0,0,SNR
+        JMP FSVEXT
+        LDA 1, K4
+        SUB# 1,0,SZR
+        JMP FSVDSK
+        JSR @XERR
+        DW EMFULL
+FSVEXT: LDA 0, FSVSTART
+        STA 0, FSVBLOCK
+        LDA 1, FSVWP
+        LDA 0, FSVNINE     ; write before publishing the entry
+        JSR @FSVSYS
+        MOV 0,0,SZR
+        JMP FSVDSK
+        LDA 2, FSVENTP
+        LDA 0, FSVSTART
+        STA 0, 6,2
+        LDA 0, FSVCNT
+        STA 0, 7,2
+        LDA 0, FSVLEN
+        STA 0, 12,2
+        LDA 1, FSVPP
+        LDA 0, K10         ; publish
+        JSR @FSVSYS
+        MOV 0,0,SNR
+        JMP @XMAIN
+FSVSTATUS:
+        LDA 1, K1
+        SUB# 1,0,SNR
+        JMP FSVDUP
+        LDA 1, K4
+        SUB# 1,0,SZR
+        JMP FSVDSK
+        JSR @XERR
+        DW EMDIRFULL
+FSVDUP: JSR @XERR
+        DW EMEXISTS
+FSVDSK: JSR @XERR
+        DW EMDSK
+
+FSVSYS: DW 0o1002
+FSVELEVEN:DW 0o13
+FSVMAGP:DW FLDMAG1
+FSVAP:  DW FSVACB
+FSVWP:  DW FSVWCB
+FSVPP:  DW FSVPCB
+FSVNAMEP:DW CLNAME
+FSVENTP:DW FLDENTRY
+FSVNINE:DW 0o11
+FSVCOUNT:DW 0
+FSVACB: DW 0
+FSVCNT: DW 0
+FSVSTART:DW 0
+FSVWCB: DW 0
+FSVBLOCK:DW 0
+FSVSRC: DW 0
+FSVLEN: DW 0
+FSVPCB: DW 0, FLDENTRY
+
+; LOCAL READ: TYPE_BIN with header ["FO"]["CL"][1], then the native
+; line records and a final zero line number. Reset has already run.
+FLDLOAD:LDA 1, FLDLOOKP
+        LDA 0, K7           ; filesystem lookup
+        JSR @FLDSYS
+        MOV 0,0,SNR
+        JMP FLDMETA
+        LDA 1, K1
+        SUB# 1,0,SNR
+        JMP FLDMISSING
+        JMP FLDDISK
+FLDMETA:LDA 2, FLDENTP
+        LDA 0, 5,2
+        LDA 1, K2           ; TYPE_BIN
+        SUB# 1,0,SZR
+        JMP FLDFMT
+        LDA 0, 12,2         ; length in words (offset 10 decimal)
+        LDA 1, K4           ; three header words and at least the end marker
+        SUBZ# 1,0,SNC
+        JMP FLDFMT
+        LDA 1, PPLIM
+        LDA 3, PPBASE
+        SUB 3,1
+        LDA 3, K4           ; exclusive length limit = arena + header + 1
+        ADD 3,1
+        SUBZ# 1,0,SZC
+        JMP FLDFMT
+        STA 0, FLDLEFT
+        LDA 1, K177
+        ADD 1,0
+        LDA 1, K200
+        JSR @XDIV16         ; ceil(length / 128)
+        LDA 2, FLDENTP
+        LDA 1, 7,2
+        SUB# 1,0,SZR
+        JMP FLDFMT
+        LDA 1, 6,2
+        MOV 1,1,SNR
+        JMP FLDFMT
+        LDA 2, FLDDISKLIM
+        SUBZ# 2,1,SZC       ; start < first reserved block
+        JMP FLDFMT
+        STA 1, FLDBLOCK
+        ADD 1,0
+        SUBZ# 0,2,SNC       ; exclusive end <= first reserved block
+        JMP FLDFMT
+        SUB 0,0
+        STA 0, FLDAVAIL
+        STA 0, FLDPREV
+        LDA 0, PPBASE
+        STA 0, FLDDST
+        JMP FLDHEADER
+FLDMISSING:
+        JSR @XERR           ; program is already empty
+        DW EMNOFILE
+FLDFMT: JSR @CLRESETP2      ; discard any partially copied program
+        JSR @XERR
+        DW EMFILE
+FLDDISK:JSR @CLRESETP2
+        JSR @XERR
+        DW EMDSK
+
+CLRESETP2:DW RESET
+FLDSYS: DW 0o1002
+FLDENTP:DW FLDENTRY
+FLDLOOKP:DW FLDLOOK
+FLDLOOK:DW 0, CLNAME, FLDENTRY
+FLDENTRY:DW 0,0,0,0,0,0,0,0,0,0,0,0
+FLDDISKLIM:DW 0o1767        ; block 1015 is the first reserved sector
+FLDGETP:DW FLDGET
+FLDPUTP:DW FLDPUT
+FLDMAG1:DW 0x464F           ; FO
+FLDMAG2:DW 0x434C           ; CL
+FLDMAXLN:DW 0o23417         ; 99.99, as decimal 9999
+FLDDST: DW 0
+FLDPREV:DW 0
+FLDNCHAR:DW 0
+FLDLEFT:DW 0
+FLDAVAIL:DW 0
+FLDCBP: DW FLDDISKCB
+FLDDISKCB:DW 0
+FLDBLOCK:DW 0
+        DW 0o70000
+
+FLDHEADER:
+        JSR @FLDGETP
+        LDA 1, FLDMAG1
+        SUB# 1,0,SZR
+        JMP FLDFMT
+        JSR @FLDGETP
+        LDA 1, FLDMAG2
+        SUB# 1,0,SZR
+        JMP FLDFMT
+        JSR @FLDGETP
+        LDA 1, K1
+        SUB# 1,0,SZR
+        JMP FLDFMT
+FLDLINE:JSR @FLDGETP
+        MOV 0,0,SNR
+        JMP FLDEND
+        LDA 1, FLDPREV
+        SUBZ# 0,1,SZC       ; previous < current
+        JMP FLDFMT
+        LDA 1, K100
+        SUBZ# 1,0,SNC       ; group must be at least 1
+        JMP FLDFMT
+        LDA 1, FLDMAXLN
+        ADCZ# 1,0,SZC       ; number <= 9999
+        JMP FLDFMT
+        STA 0, FLDPREV
+        LDA 1, K100
+        JSR @XDIV16
+        MOV 1,1,SNR         ; step must be nonzero
+        JMP FLDFMT
+        LDA 0, FLDPREV
+        JSR @FLDPUTP
+        SUB 0,0
+        STA 0, FLDNCHAR
+FLDCHAR:JSR @FLDGETP
+        MOV 0,0,SNR
+        JMP FLDEOL
+        LDA 1, CSP
+        SUBZ# 1,0,SNC       ; printable ASCII only
+        JMP FLDFMT
+        LDA 1, CDEL
+        SUBZ# 1,0,SZC
+        JMP FLDFMT
+        LDA 1, KMAXL
+        LDA 2, FLDNCHAR
+        SUBZ# 1,2,SZC
+        JMP FLDFMT
+        ISZ FLDNCHAR
+        NOP
+        JSR @FLDPUTP
+        JMP FLDCHAR
+FLDEOL: LDA 1, FLDNCHAR
+        MOV 1,1,SNR
+        JMP FLDFMT          ; a numbered line without text is not a record
+        JSR @FLDPUTP
+        JMP FLDLINE
+FLDEND: LDA 1, FLDLEFT
+        MOV 1,1,SZR
+        JMP FLDFMT          ; no words allowed after the end marker
+        LDA 2, FLDDST
+        STA 0, 0,2
+        STA 2, PEND
+        JMP @XMAIN
+
+; Each output word consumes one of the length-checked input words.
+FLDPUT: LDA 2, FLDDST
+        STA 0, 0,2
+        ISZ FLDDST
+        NOP
+        JMP 0,3
+
+; Fetch a word or abort if the declared payload ends mid-record or I/O fails.
+; CVIT uses only the first half of each sector, but DSK transfers all 256 words.
+FLDGET: STA 3, FLDGETRT
+        LDA 0, FLDLEFT
+        MOV 0,0,SNR
+        JMP FLDFMT
+        LDA 0, FLDAVAIL
+        MOV 0,0,SZR
+        JMP FLDTAKE
+        LDA 2, FLDCBP
+        JSR @FLDREADP
+        LDA 1, K1
+        SUB# 1,0,SZR
+        JMP FLDDISK
+        ISZ FLDBLOCK
+        NOP
+        LDA 0, FLDBUFP
+        STA 0, FLDPTR
+        LDA 0, K200
+        STA 0, FLDAVAIL
+FLDTAKE:LDA 2, FLDPTR
+        LDA 0, 0,2
+        ISZ FLDPTR
+        NOP
+        DSZ FLDAVAIL
+        NOP
+        DSZ FLDLEFT
+        NOP
+        JMP @FLDGETRT
+FLDGETRT:DW 0
+FLDPTR: DW 0
+FLDREADP:DW 0o1004
+FLDBUFP:DW 0o70000
+
+; =====================================================================
 ; Messages (one char per word, NUL-terminated).
 BANNER: DW 0o015, 0o012
         .TXT "FOCAL/Nova V0.1"
@@ -2996,6 +3449,18 @@ EMSTK:  .TXT "STK"
 EMVAR:  .TXT "VAR"
         DW 0
 EMFUN:  .TXT "FUN"
+        DW 0
+EMEXISTS:.TXT "EXISTS"
+        DW 0
+EMFULL: .TXT "FULL"
+        DW 0
+EMDIRFULL:.TXT "DIRFULL"
+        DW 0
+EMNOFILE:.TXT "NOFILE"
+        DW 0
+EMFILE: .TXT "FILE"
+        DW 0
+EMDSK:  .TXT "DSK"
         DW 0
 
 ; Page-zero image is appended here by abs2flat.py --pz.  Keep last.

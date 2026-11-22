@@ -85,8 +85,9 @@ It calls the extension probe at `0o65000`, requiring
 AC0 = `0o12345`, then jumps to `0o1000`. The kernel image includes its
 directory buffer; unused space is zero-padded. Sectors 1015–1023 are reserved
 from filesystem allocation. RUN programs must preserve `0o65000`–`0o67777`.
-The extension provides read-only directory enumeration and lookup services;
-allocation and write services are not yet implemented. Host-assisted `--console` and `--batch` modes assemble
+The kernel and extension provide directory enumeration, lookup, allocation,
+extent writes, and create-only directory publication (see `docs/cvit-filesystem-api-draft.md`).
+Host-assisted `--console` and `--batch` modes assemble
 and load the extension from `sd/cvit-extension.asm`. `scripts/test-dsk-boot.sh` exercises both emulators. The older
 Dusky `--console` and `--batch` modes still load the kernel from host source.
 
@@ -126,9 +127,9 @@ The boot loader and COMMAND traverse this chain using the extension's
 read-only filesystem API. `CAT` / `CATALOG` marks each live duplicate name
 with `[DUP]`; tombstoned entries do not count. A tombstone is indicated by
 bit 15 of entry word 11, and enumeration and lookup skip such entries.
-The kernel can reserve blocks, but file creation and tombstoning are not yet
-implemented. Version 1 images are unsupported and should be rebuilt with the
-current builder.
+FOCAL can create members in free slots in the existing directory chain.
+Directory growth, replacement, and tombstoning are not yet implemented.
+Version 1 images are unsupported and should be rebuilt with the current builder.
 
 ## COMMAND member format
 
