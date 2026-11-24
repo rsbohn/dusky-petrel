@@ -129,7 +129,13 @@ where the entry has 12 words. Status is 0 success, 1 duplicate live name,
 2 I/O error, 3 invalid drive/volume/entry, or 4 directory full. Both reject
 a duplicate live name anywhere in the linked directory. If the name is
 absent, they validate the chain before selecting the first unused or
-tombstoned slot. They do not add directory blocks.
+tombstoned slot. If the last linked block has no free slot, selector 10
+grows the chain by one block: it reserves a sector through the kernel
+FSALLOC vector (0o1011), formats it, links it from the old last block,
+and publishes into its first slot. Selector 11 reserves nothing; in
+that case it succeeds only if one more sector would fit under the
+allocator end limit. Status 4 therefore means the chain is full and
+the volume has no sector to grow with.
 
 Selector 11 checks the name, type, live flag, and availability of a slot;
 it does not reserve space or write anything. The caller can preflight,
@@ -137,12 +143,18 @@ reserve and write its payload, then pass the complete entry to selector 10.
 Selector 10 checks again and publishes the directory entry. It does not
 verify ownership or completeness of the payload; that is the caller's
 responsibility. A write failure after allocation may leak reserved blocks.
-Replacing an existing live name is not supported.
+
+Selector 12 replaces a live member in place, given the same control
+block as selectors 10 and 11. The caller preflights with selector 11,
+reserves and writes the new extent (selectors 8 and 9), then passes
+the complete entry to selector 12, which switches the live directory
+entry to the new extent. Statuses: 0 switched, 1 no live member has
+that name, 2 I/O error, 3 invalid entry or volume. A crash before the
+switch leaves the old version valid and leaks the new extent.
 
 ## Required validation before adoption
 
 Additional tests are needed for interleaved cursors, I/O errors, malformed
 links, buffer bounds, and execution through disk boot and host-assisted modes.
 The boot loader and COMMAND use the read-only API. FOCAL uses the write
-API for create-only saves. Directory growth and crash-safe replacement
-require further implementation.
+API for saves, including copy-on-write re-save through selector 12.

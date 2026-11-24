@@ -22,7 +22,7 @@ ENTRY=$(printf '0o%o' $(( 8#3000 + 1 + N1 )))
 python3 scripts/mk_cvit_nova.py "$WORKDIR/cvit-tc08.img" \
     "COMMAND=$WORKDIR/command.bin@0o3000,$ENTRY" \
     "FOCAL=$WORKDIR/focal.sys@0o6000,0o6000" \
-    README.md=README.md "HELLO=$WORKDIR/hello.txt"
+    README.md=README.md HELP=HELP.txt "HELLO=$WORKDIR/hello.txt"
 mkdir -p "$(dirname "$OUT")"
 python3 simh/convert-tc08-to-dsk.py "$WORKDIR/cvit-tc08.img" "$OUT"
 python3 scripts/install-dsk-boot.py "$OUT" "$WORKDIR/boot.abs" "$WORKDIR/kernel.abs" "$WORKDIR/extension.abs"

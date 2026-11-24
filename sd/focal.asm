@@ -14,7 +14,8 @@
 ; (GETC 0o1006, PUTC 0o1007).  QUIT at the * prompt, or EOT (Ctrl-D)
 ; anywhere, returns to COMMAND through the kernel warm start (0o1001).
 ;
-; Commands: ASK COMMENT DO ERASE FOR GOTO IF LOCAL QUIT RETURN SET TYPE WRITE
+; Commands: ASK COMMENT DO ERASE FOR GOTO IF QUIT RETURN SET TYPE WRITE
+; Dot commands at the prompt: .save, .load
 ; Functions: FABS FSGN FITR FSQT
 ; Numbers: 32-bit DG-style floating point (sign, excess-64 hex exponent,
 ; 24-bit hex-normalized fraction), done in software.
@@ -307,15 +308,15 @@ MAIN:   LDA 0, PSTK
         JMP MDIRECT
         JSR @XLNENT
         JMP MAIN
-MDIRECT:LDA 1, MLOCALC
+MDIRECT:LDA 1, MDOTC
         SUB# 0,1,SNR
-        JMP @MLOCALP
+        JMP @MDOTP
         SUB 0,0
         SUB 1,1
         JSR @XRUNSEG
         JMP MAIN
-MLOCALC:DW 0o114            ; L
-MLOCALP:DW CLOCAL
+MDOTC:  DW 0o056            ; .
+MDOTP:  DW CDOTCMD
 
 ; ---- ERR: JSR @XERR followed by DW message ----
 ERR:    LDA 2, 0,3
@@ -2996,22 +2997,20 @@ SQG1:   DW 0
 SQC:    DW 0
 
 ; =====================================================================
-; LOCAL is a standalone prompt command. Parse before changing any state.
-; CLMODE = 0 for READ, 1 for WRITE. CLNAME holds five packed CVIT words
-; in static workspace, independent of the input buffer and FOCAL stack.
-CLOCAL: LDA 2, CLLP
-        JSR CLWORD
-        JMP CLCMD
-        JSR @XSKSP
-        LDA 2, CLRP
-        JSR CLWORD
-        JMP CLTRYW
-        SUB 0,0
-        JMP CLMODEST
-CLTRYW: LDA 2, CLWP
-        JSR CLWORD
-        JMP CLSYN
+; Dot commands are standalone prompt commands: .save and .load, as on
+; CPU6. Parse before changing any state. CLMODE = 0 for load, 1 for
+; save. CLNAME holds five packed CVIT words in static workspace,
+; independent of the input buffer and FOCAL stack.
+CDOTCMD:JSR @XADVC
+        LDA 2, CDSVP
+        JSR CDWORD
+        JMP CDTRYL
         LDA 0, K1
+        JMP CLMODEST
+CDTRYL: LDA 2, CDLDP
+        JSR CDWORD
+        JMP CLCMD
+        SUB 0,0
 CLMODEST:
         STA 0, CLMODE
         JSR @XSKSP
@@ -3084,55 +3083,63 @@ CLCMD:  JSR @XERR
 CLSYN:  JSR @XERR
         DW EMSYN
 
-; Compare the word at TXP with the string at AC2. Skip on a match
-; followed by a space or NUL, advancing TXP only on success.
-CLWORD: STA 3, CLRT
+; Compare the word at TXP with the string at AC2, folding lowercase
+; input letters to uppercase (AND with 0o137; only letters can match
+; the target strings). Skip on a match followed by a space or NUL,
+; advancing TXP only on success.
+CDWORD: STA 3, CLRT
         LDA 3, TXP
-CLWLP:  LDA 1, 0,2
+CDWLP:  LDA 0, 0,3
+        LDA 1, CLUS
+        AND 1,0
+        STA 0, CDFCH
+        LDA 1, 0,2
         MOV 1,1,SNR
-        JMP CLWEND
-        LDA 0, 0,3
+        JMP CDWEND
+        LDA 0, CDFCH
         SUB# 1,0,SZR
         JMP @CLRT
         INC 2,2
         INC 3,3
-        JMP CLWLP
-CLWEND: LDA 0, 0,3
+        JMP CDWLP
+CDWEND: LDA 0, 0,3
         MOV 0,0,SNR
-        JMP CLWOK
+        JMP CDWOK
         LDA 1, CSP
         SUB# 0,1,SZR
         JMP @CLRT
-CLWOK:  STA 3, TXP
+CDWOK:  STA 3, TXP
         ISZ CLRT
         JMP @CLRT
 
 CLRT:   DW 0
+CDFCH:  DW 0
 CLMODE: DW 0
 CLDST:  DW 0
 CLCNT:  DW 0
 CLUS:   DW 0o137            ; underscore
 CLNEG5: DW 0o177773
-CLLP:   DW CLL
-CLRP:   DW CLR
-CLWP:   DW CLW
+CDSVP:  DW CDS
+CDLDP:  DW CDL
 CLRESETP:DW RESET
 CLLOADP: DW FLDLOAD
 CLSVP:  DW FSVSAVE
 CLCHARP:DW CLCHARS
 CLNAMEP:DW CLNAME
-CLL:    .TXT "LOCAL"
+CDS:    .TXT "SAVE"
         DW 0
-CLR:    .TXT "READ"
-        DW 0
-CLW:    .TXT "WRITE"
+CDL:    .TXT "LOAD"
         DW 0
 CLCHARS:DW 0,0,0,0,0,0,0,0,0,0
 CLNAME: DW 0,0,0,0,0
 
-; LOCAL WRITE: create only. Stage the three-word header immediately below
+; .save: a live duplicate is replaced copy-on-write (fresh extent,
+; then selector 12 switches the existing entry to it; the old extent
+; is orphaned). Stage the three-word header immediately below
 ; PPBASE, so the header and the live arena form one contiguous source.
-FSVSAVE:LDA 2, FSVNAMEP
+FSVSAVE:SUB 0,0
+        STA 0, FSVRPL
+        LDA 2, FSVNAMEP
         LDA 3, FSVENTP
         LDA 0, CLNEG5
         STA 0, FSVCOUNT
@@ -3154,7 +3161,7 @@ FSVNAME:LDA 0, 0,2
         JSR @FSVSYS
         MOV 0,0,SZR
         JMP FSVSTATUS
-        LDA 2, PPBASE
+FSVBODY:LDA 2, PPBASE
         LDA 1, K3
         SUB 1,2
         STA 2, FSVSRC
@@ -3198,12 +3205,21 @@ FSVEXT: LDA 0, FSVSTART
         STA 0, 7,2
         LDA 0, FSVLEN
         STA 0, 12,2
+        LDA 0, FSVRPL
+        MOV 0,0,SNR
+        JMP FSVPUB
         LDA 1, FSVPP
+        LDA 0, FSVTWELVE   ; switch the live entry (selector 12)
+        JSR @FSVSYS
+        MOV 0,0,SZR
+        JMP FSVRPLSTAT
+        JMP @XMAIN
+FSVPUB: LDA 1, FSVPP
         LDA 0, K10         ; publish
         JSR @FSVSYS
         MOV 0,0,SNR
         JMP @XMAIN
-FSVSTATUS:
+FSVPUBSTAT:
         LDA 1, K1
         SUB# 1,0,SNR
         JMP FSVDUP
@@ -3212,6 +3228,23 @@ FSVSTATUS:
         JMP FSVDSK
         JSR @XERR
         DW EMDIRFULL
+FSVSTATUS:
+        LDA 1, K1
+        SUB# 1,0,SNR
+        JMP FSVRPLSET
+        LDA 1, K4
+        SUB# 1,0,SZR
+        JMP FSVDSK
+        JSR @XERR
+        DW EMDIRFULL
+FSVRPLSET:LDA 0, K1
+        STA 0, FSVRPL
+        JMP FSVBODY
+FSVRPLSTAT:
+        LDA 1, K1
+        SUB# 1,0,SZR
+        JMP FSVDSK
+        JMP FSVPUB
 FSVDUP: JSR @XERR
         DW EMEXISTS
 FSVDSK: JSR @XERR
@@ -3227,6 +3260,8 @@ FSVNAMEP:DW CLNAME
 FSVENTP:DW FLDENTRY
 FSVNINE:DW 0o11
 FSVCOUNT:DW 0
+FSVRPL: DW 0
+FSVTWELVE:DW 0o14
 FSVACB: DW 0
 FSVCNT: DW 0
 FSVSTART:DW 0
@@ -3236,7 +3271,7 @@ FSVSRC: DW 0
 FSVLEN: DW 0
 FSVPCB: DW 0, FLDENTRY
 
-; LOCAL READ: TYPE_BIN with header ["FO"]["CL"][1], then the native
+; .load: TYPE_BIN with header ["FO"]["CL"][1], then the native
 ; line records and a final zero line number. Reset has already run.
 FLDLOAD:LDA 1, FLDLOOKP
         LDA 0, K7           ; filesystem lookup

@@ -452,13 +452,18 @@ WDISKPLUS: DW 0o1770
 ; Status: 0 published, 1 duplicate, 2 I/O error, 3 invalid input/volume,
 ; 4 directory full. Selector 11 uses the same CB and validation but only
 ; checks whether publication is possible, without writing or reserving.
-; Only existing linked directory blocks are used; no directory growth.
+; When the last linked block has no free slot, the chain grows by one
+; freshly formatted block (see PRGROW). Selector 11 only checks that
+; growth would succeed; it never reserves.
         ORG 0o67000
 PUBLISH: JMP PRPUB
 PUBCHECK:JMP PRCHECK
+PUBRPL: JMP PRREPL
 PRPUB:  SUB 0,0
         JMP PRSTART
 PRCHECK:LDA 0, PRONE
+        JMP PRSTART
+PRREPL: LDA 0, @PRTWOP
         JMP PRSTART
 PRREADP: DW PRREAD
 PRONE: DW 1
@@ -473,15 +478,22 @@ PRLOOKCB:DW 0,0,PRFOUND
 PRFOUND: DW 0,0,0,0,0,0,0,0,0,0,0,0
 PRROOT: DW EROOT
 PRSCAN: DW 0
+PRLSTAT: DW 0
+PRRPLPTR:DW PRRPLSLOT
+PRFOURP:DW PRFOUR
+PRHIGHP:DW PRHIGH
+PRTWOP: DW PRTWO
+PRDRIVEP:DW PRDRIVE
+PRBLOCKP:DW PRBLOCK
 PRRET:  DW 0
 PRSTART:STA 3, PRRET
         STA 0, PRSCAN
         MOV 1,2
         LDA 0, 0,2
-        LDA 1, PRTWO
+        LDA 1, @PRTWOP
         SUBZ# 1,0,SZC
         JMP PRBAD
-        STA 0, PRDRIVE
+        STA 0, @PRDRIVEP
         STA 0, PRLOOKCB
         LDA 0, 1,2
         MOV 0,0,SNR
@@ -493,27 +505,41 @@ PRSTART:STA 3, PRRET
         LDA 0, 5,2
         MOV 0,0,SNR
         JMP PRBAD
-        LDA 1, PRFOUR
+        LDA 1, @PRFOURP
         SUBZ# 1,0,SZC
         JMP PRBAD
         LDA 0, 0,2
         MOV 0,0,SNR
         JMP PRBAD
         LDA 0, 13,2
-        LDA 1, PRHIGH
+        LDA 1, @PRHIGHP
         AND 1,0,SZR
         JMP PRBAD
         ; Reject a duplicate even if an earlier slot is free. An absent
         ; name means LOOKUP validated the complete chain, including EROOT.
         LDA 1, PRLOOKCBP
         JSR @PRLOOKP
+        STA 0, PRLSTAT
+        LDA 0, PRSCAN
+        LDA 1, @PRTWOP
+        SUB# 1,0,SZR
+        JMP PRPUBFLOW
+        LDA 0, PRLSTAT
+        MOV 0,0,SZR
+        JMP PRRPLRET
+        LDA 0, @PRROOT
+        STA 0, @PRBLOCKP
+        JMP PRBLOCKLP
+PRRPLRET:LDA 0, PRLSTAT
+        JMP @PRRET
+PRPUBFLOW:LDA 0, PRLSTAT
         MOV 0,0,SNR
         JMP PRDUP
         LDA 1, PRONE
         SUB# 1,0,SZR
         JMP @PRRET          ; propagate I/O or malformed directory
         LDA 0, @PRROOT
-        STA 0, PRBLOCK
+        STA 0, @PRBLOCKP
 PRBLOCKLP:
         JSR @PRREADP
         LDA 1, PRONE
@@ -535,6 +561,12 @@ PRSLOT:
         LDA 2, PRBUFP
         ADD 0,2
         STA 2, PRSLOTP
+        LDA 0, PRSCAN
+        LDA 1, @PRTWOP
+        SUB# 1,0,SZR
+        JMP PRFREESCAN
+        JMP @PRRPLPTR
+PRFREESCAN:
         LDA 0, 0,2
         MOV 0,0,SNR
         JMP PRSTORE
@@ -549,44 +581,88 @@ PRSLOT:
         JMP PRSTORE
         ISZ PRINDEX
         JMP PRSLOT
+PROK:   SUB 0,0
+        LDA 2, @PRRRETP
+        STA 2, PRJRET
+        JMP @PRJRET
+PRDUP:  SUB 0,0
+        INC 0,0
+        LDA 2, @PRRRETP
+        STA 2, PRJRET
+        JMP @PRJRET
+PRBAD:  SUB 0,0
+        INC 0,0
+        INC 0,0
+        INC 0,0
+        LDA 2, @PRRRETP
+        STA 2, PRJRET
+        JMP @PRJRET
+PRFULL: SUB 0,0
+        INC 0,0
+        INC 0,0
+        INC 0,0
+        INC 0,0
+        LDA 2, @PRRRETP
+        STA 2, PRJRET
+        JMP @PRJRET
+PRIO:   SUB 0,0
+        INC 0,0
+        INC 0,0
+        LDA 2, @PRRRETP
+        STA 2, PRJRET
+        JMP @PRJRET
+PRRRETP:DW PRRET
+PRJRET: DW 0
+PRSCANL:DW PRSCAN
+PRENTRYL:DW PRENTRY
+PRSLOTL:DW PRSLOTP
+PRCOUNTL:DW PRCOUNT
+PRONEL: DW PRONE
+PRBLOCKP2:DW PRBLOCK
 PRLINK: LDA 2, PRLINKP
         LDA 0, 0,2
         MOV 0,0,SNR
-        JMP PRFULL
-        STA 0, PRBLOCK
+        JMP PRLINKEND
+        STA 0, @PRBLOCKP2
         LDA 1, PRMAXBLOCK
         SUBZ# 1,0,SZC
         JMP PRBAD
         JMP PRBLOCKLP
-PRSTORE:LDA 0, PRSCAN
+; Chain end (no link): publish modes grow the chain; replace mode
+; never grows, so the name is simply absent.
+PRLINKEND:
+        LDA 0, @PRSCANL
+        LDA 1, PRTWO
+        SUB# 1,0,SZR
+        JMP PRGROW
+        SUB 0,0
+        INC 0,0
+        LDA 2, @PRRRETP
+        STA 2, PRJRET
+        JMP @PRJRET
+PRSTORE:LDA 0, @PRSCANL
         MOV 0,0,SZR
         JMP PROK
-        LDA 2, PRENTRY
-        LDA 3, PRSLOTP
+        LDA 2, @PRENTRYL
+        LDA 3, @PRSLOTL
         LDA 1, PRTWELVE
-        STA 1, PRCOUNT
+        STA 1, @PRCOUNTL
 PRCOPY: LDA 0, 0,2
         STA 0, 0,3
         INC 2,2
         INC 3,3
-        ISZ PRCOUNT
+        LDA 0, @PRCOUNTL
+        INC 0,0
+        STA 0, @PRCOUNTL
+        MOV 0,0,SZR
         JMP PRCOPY
         ; Write the entire directory sector back, preserving other words.
         LDA 2, PRDISKP
         JSR @PRWRITE
-        LDA 1, PRONE
+        LDA 1, @PRONEL
         SUB# 1,0,SZR
         JMP PRIO
-PROK:   SUB 0,0
-        JMP @PRRET
-PRDUP:  LDA 0, PRONE
-        JMP @PRRET
-PRBAD:  LDA 0, PRTHREE
-        JMP @PRRET
-PRFULL: LDA 0, PRFOUR
-        JMP @PRRET
-PRIO:   LDA 0, PRTWO
-        JMP @PRRET
+        JMP PROK
 
 ; Read one filesystem payload block into the extension sector buffer.
 PRREAD: LDA 2, PRDISKP
@@ -607,4 +683,202 @@ PRHIGH: DW 0o100000
 PRZERO: DW 0
 PRMAXBLOCK: DW 0o1767
 PRLINKP: DW 0o77162
+PRSAVE: DW 0
+PRNEW:  DW 0
+PRACBP: DW PRACB
+PRACB:  DW 0, 1, 0
+PRNEG256: DW 0o177400
 
+
+; Chain growth. The publish slot scan reached the end of the chain
+; (link word zero) with no free slot; PRLINK jumps here. This block
+; sits beyond PC-relative reach of the publish code, so publish state
+; is accessed through pointer cells and returns are indirect jumps.
+; Check mode never reserves: it reads the volume header and applies
+; FSALLOC validation and its end limit to decide whether one more
+; sector would fit. Publish mode reserves one sector via the
+; direct FSALLOC vector (0o1011; the dispatcher is not reentrant),
+; formats it, links it from the old last block, and publishes into
+; its first slot. FSALLOC shares the 0o77000 scratch buffer, so the
+; old last block is re-read after allocating before its link word is
+; set. A crash between formatting and linking leaks one reserved
+; sector, which the allocator already tolerates; a crash after
+; linking leaves a valid empty block at the chain end.
+PRGROW: LDA 0, @PRGSCANP
+        MOV 0,0,SZR
+        JMP PRGFIT
+        LDA 0, @PRGBLKP
+        STA 0, PRSAVE
+        LDA 1, PRACBP
+        JSR @PRGALLOC
+        MOV 0,0,SZR
+        JMP PRGRES
+        LDA 0, PRACB+2
+        STA 0, PRNEW
+        LDA 2, PRGBUFP
+        LDA 0, PRNEG256
+        STA 0, PRGCOUNT
+        SUB 0,0
+PRGFMT: STA 0, 0,2
+        INC 2,2
+        ISZ PRGCOUNT
+        JMP PRGFMT
+        LDA 0, PRNEW
+        STA 0, @PRGBLKP
+        LDA 2, PRGDISKP
+        JSR @PRGWRITE
+        LDA 1, PRGONE
+        SUB# 1,0,SZR
+        JMP @PRGIOP
+        LDA 0, PRSAVE
+        STA 0, @PRGBLKP
+        JSR @PRGREADP
+        LDA 1, PRGONE
+        SUB# 1,0,SZR
+        JMP @PRGIOP
+        LDA 2, PRGLINKP
+        LDA 0, PRNEW
+        STA 0, 0,2
+        LDA 2, PRGDISKP
+        JSR @PRGWRITE
+        LDA 1, PRGONE
+        SUB# 1,0,SZR
+        JMP @PRGIOP
+        LDA 0, PRNEW
+        STA 0, @PRGBLKP
+        JSR @PRGREADP
+        LDA 1, PRGONE
+        SUB# 1,0,SZR
+        JMP @PRGIOP
+        LDA 0, PRGBUFP
+        STA 0, @PRGSLOTP
+        JMP @PRGSTOREP
+PRGRES: LDA 1, PRGFOUR
+        SUB# 1,0,SZR
+        JMP PRGRES2
+        JMP @PRGFULLP
+PRGRES2:LDA 1, PRGTWO
+        SUB# 1,0,SZR
+        JMP @PRGBADP
+        JMP @PRGIOP
+PRGFIT: LDA 0, PRGZERO
+        STA 0, @PRGBLKP
+        JSR @PRGREADP
+        LDA 1, PRGONE
+        SUB# 1,0,SZR
+        JMP @PRGIOP
+        LDA 2, PRGBUFP
+        LDA 0, 0,2
+        LDA 1, PRGMAG1
+        SUB# 1,0,SZR
+        JMP @PRGBADP
+        LDA 0, 1,2
+        LDA 1, PRGMAG2
+        SUB# 1,0,SZR
+        JMP @PRGBADP
+        LDA 0, 2,2
+        LDA 1, PRGTWO
+        SUB# 1,0,SZR
+        JMP @PRGBADP
+        LDA 0, 6,2
+        LDA 1, PRGTWO
+        SUBZ# 1,0,SNC
+        JMP @PRGBADP
+        LDA 0, 6,2
+        INC 0,0
+        LDA 1, PRGALIM
+        SUBZ# 1,0,SZC
+        JMP @PRGFULLP
+        JMP @PRGPROKP
+PRGSCANP: DW PRSCAN
+PRGBLKP: DW PRBLOCK
+PRGSLOTP: DW PRSLOTP
+PRGREADP: DW PRREAD
+PRGSTOREP: DW PRSTORE
+PRGPROKP: DW PROK
+PRGIOP: DW PRIO
+PRGFULLP: DW PRFULL
+PRGBADP: DW PRBAD
+PRGALLOC: DW 0o1011
+PRGWRITE: DW 0o1005
+PRGDISKP: DW PRDRIVE
+PRGBUFP: DW 0o77000
+PRGLINKP: DW 0o77162
+PRGCOUNT: DW 0
+PRGZERO: DW 0
+PRGONE: DW 1
+PRGTWO: DW 2
+PRGFOUR: DW 4
+PRGMAG1: DW 0o41526
+PRGMAG2: DW 0o47126
+PRGALIM: DW 0o1770
+
+; ---- selector 12 (replace) slot machinery ----
+; Lives with the growth block, beyond PC-relative reach of the publish
+; section, so publish state is reached through pointer cells and exits
+; are direct jumps. PRRPLSLOT is entered from PRSLOT with PRSLOTP set.
+PRRPLSLOT:LDA 2, @PRGSLOTP
+        LDA 0, 0,2
+        MOV 0,0,SNR
+        JMP PRNEXT
+        LDA 1, @PRGELEVP
+        ADD 1,2
+        LDA 0, 0,2
+        LDA 1, @PRGHIGHP
+        AND 1,0,SZR
+        JMP PRNEXT
+        LDA 2, @PRGSLOTP
+        STA 2, PRRDST
+        LDA 2, @PRGENTP
+        STA 2, PRRSRC
+        LDA 0, PRNEG5
+        STA 0, PRRCNT
+PRRPLP: LDA 2, PRRSRC
+        LDA 0, 0,2
+        LDA 2, PRRDST
+        LDA 1, 0,2
+        SUB# 1,0,SZR
+        JMP PRNEXT
+        ISZ PRRSRC
+        ISZ PRRDST
+        ISZ PRRCNT
+        JMP PRRPLP
+        LDA 2, @PRGENTP
+        LDA 0, PRFIVE
+        ADD 0,2
+        STA 2, PRRSRC
+        LDA 2, @PRGSLOTP
+        LDA 0, PRFIVE
+        ADD 0,2
+        STA 2, PRRDST
+        LDA 0, PRNEG7
+        STA 0, PRRCNT
+PRSWLP: LDA 2, PRRSRC
+        LDA 0, 0,2
+        LDA 2, PRRDST
+        STA 0, 0,2
+        ISZ PRRSRC
+        ISZ PRRDST
+        ISZ PRRCNT
+        JMP PRSWLP
+        LDA 2, PRGDISKP
+        JSR @PRGWRITE
+        LDA 1, PRGONE
+        SUB# 1,0,SZR
+        JMP @PRGIOP
+        JMP @PRGPROKP
+PRNEXT: LDA 0, @PRGINDEXP
+        INC 0,0
+        STA 0, @PRGINDEXP
+        JMP @PRGNEXTP
+PRRSRC: DW 0
+PRRDST: DW 0
+PRRCNT: DW 0
+PRNEG5: DW 0o177773
+PRNEG7: DW 0o177771
+PRFIVE: DW 5
+PRGENTP: DW PRENTRY
+PRGELEVP:DW PRELEVEN
+PRGHIGHP:DW PRHIGH
+PRGINDEXP:DW PRINDEX
+PRGNEXTP:DW PRSLOT

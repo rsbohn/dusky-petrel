@@ -57,25 +57,31 @@ erases the last character.
 
 Group and line arguments are expressions (`DO N`, `GOTO 1+.1`).
 
-### Local program files
+### Program files: .save and .load
 
-`LOCAL READ FOO` and `LOCAL WRITE FOO` take one bare CVIT member name:
+`.load FOO` and `.save FOO` take one bare CVIT member name:
 1–10 characters (`A`–`Z`, `0`–`9`, `.`, `-`, `_`), case-insensitive.
-Spell out both command words and enter the command on its own at the `*`
-prompt, not on a numbered line or in a semicolon-separated command list.
+The command word is case-insensitive too. Enter the command on its own
+at the `*` prompt, not on a numbered line or in a semicolon-separated
+command list.
 Bare `WRITE` still lists program lines.
 
-`LOCAL READ` resets the program, variables, execution state, and output
+`.load` resets the program, variables, execution state, and output
 format before looking up the file. This is destructive: a failed load
 leaves an empty session. A syntax error does not reset it.
 
-`LOCAL READ` loads a FOCAL binary member from the default CVIT volume.
+`.load` loads a FOCAL binary member from the default CVIT volume.
 It validates and copies the numbered lines in one pass, without running
 any of them. A failure discards any partially copied program.
 
-`LOCAL WRITE` saves only numbered lines, leaving the running session
-unchanged. It creates a new member; it does not overwrite an existing one.
-A duplicate name or full directory is rejected before allocating blocks.
+`.save` saves only numbered lines, leaving the running session
+unchanged. Saving over an existing name replaces it copy-on-write:
+the new extent is reserved and written first, then the live directory
+entry is switched to it, so an interrupted save leaves the previous
+version intact (the new extent is simply leaked; the allocator is
+append-only and reclamation is a host-side compaction). The directory
+chain grows on demand, so a save runs out only when the volume itself
+is full.
 A write interrupted after allocation may leave reserved blocks unused.
 Rebuild older bootable images with `scripts/build-image.sh` to get the
 kernel that supports these commands.
@@ -134,7 +140,7 @@ return to the `*` prompt.
 | `?MEM` | Program text full |
 | `?VAR` | Variable table full (512 variables) |
 | `?STK` | Nesting too deep |
-| `?NOFILE` | Local member not found |
+| `?NOFILE` | Member not found |
 | `?FILE` | Wrong member type, invalid extent or format, or program too large |
 | `?DSK` | Disk I/O or volume/directory error |
 | `?EXISTS` | A live member already has that name |
@@ -186,5 +192,5 @@ the expected file from Dusky).
 ## Not yet
 
 - Transcendental functions (`FSIN`, `FCOS`, `FEXP`, `FLOG`, `FATN`) and `FRAN`
-- `MODIFY` and overwriting an existing member with `LOCAL WRITE`
+- `MODIFY`
 - Breaking out of a running program (Ctrl-C) without halting the machine

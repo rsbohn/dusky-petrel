@@ -25,7 +25,11 @@ CV_RDB:  JMP @V_RDB
 CV_WRB:  JMP @V_WRB
 CV_GETC: JMP @V_GETC
 CV_PUTC: JMP @V_PUTC
+; 0o1011: direct FSALLOC entry for resident services. The dispatcher
+; is not reentrant (SYSRET is a single cell), so a service must never
+; call back through CV_SYS; it uses this vector instead.
 CV_PUTS: JMP @V_PUTS
+CV_ALLOC: JMP @V_ALLOC
 
 V_COLD:  DW COLD
 V_WARM:  DW WARM
@@ -36,6 +40,7 @@ V_WRB:   DW WRITEBLK
 V_GETC:  DW GETC
 V_PUTC:  DW PUTC
 V_PUTS:  DW PUTS
+V_ALLOC: DW FSALLOC
 
 ; ---- starts ----
 
@@ -128,6 +133,11 @@ SYSCALL:STA AC3, SYSRET
         ADD AC2, AC0
         MOV AC0, AC0, SNR
         JMP SYS_PUBCHECK
+        LDA AC0, SYSSEL
+        LDA AC2, NEGD12
+        ADD AC2, AC0
+        MOV AC0, AC0, SNR
+        JMP SYS_REPLACE
         LDA AC2, SVCERRP
         JSR @P_PUTS3
         LDA AC0, ONE
@@ -184,6 +194,10 @@ SYS_PUBCHECK:
         JSR @P_PUBCHECK
         JMP @SYSRET
 
+SYS_REPLACE:
+        JSR @P_REPLACE
+        JMP @SYSRET
+
 SYSSEL:  DW 0
 SYSRET:  DW 0
 NEG1:    DW 0o177777
@@ -197,8 +211,10 @@ NEG8:    DW 0o177770
 NEG9:    DW 0o177767
 NEG10:   DW 0o177766
 NEG11:   DW 0o177765
+NEGD12:  DW 0o177764
 P_PUBLISH: DW 0o67000
 P_PUBCHECK:DW 0o67001
+P_REPLACE: DW 0o67002
 P_WRITEEXT: DW 0o65600
 P_ALLOC: DW FSALLOC
 P_ENUM:  DW 0o65003
@@ -483,7 +499,11 @@ NOCMD:   DW 0o077
 ; 3 invalid control block/header, 4 no space. The operation is non-reentrant
 ; and uses the extension's full-sector scratch buffer at 0o77000. A failed
 ; header write can leave an allocation reserved; callers must not reuse it.
-        ORG 0o1610
+; Placed above DIRBUF (ends 0o2201), inside the 3-sector kernel span
+; (0o1000-0o2377). The old 0o1610 slot overlapped the first section's
+; tail cells; once that section grew, P_RDBLK2 landed on 0o1610 and
+; the boot path's read-block pointer became FSALLOC's first word.
+        ORG 0o2202
 FSALLOC: STA 3, FARET
         MOV 1,2
         STA 2, FACALL
@@ -565,7 +585,7 @@ FALIMPLUS: DW 0o1770        ; 1016: first invalid end
 FAMAG1:  DW 0o41526
 FAMAG2:  DW 0o47126
 
-; Member-load control block, kept clear of FSALLOC at 0o1610.
+; Member-load control block, kept clear of FSALLOC at 0o2202.
         ORG 0o1750
 LDCB:    DW 0, 0, 0
 
