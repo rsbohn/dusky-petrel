@@ -93,7 +93,7 @@ Dusky `--console` and `--batch` modes still load the kernel from host source.
 
 ## Boot sequence
 
-1. **Cold start** (`0o1000`): Prints `cvit/Nova V0.1` banner via PUTS.
+1. **Cold start** (`0o1000`): Prints `cvit/Nova V0.7` banner via PUTS.
 2. **LOADCMD**: Uses the extension's directory lookup to find `COMMAND`,
    including in later directory blocks, and copies its entry to DIRBUF at
    `0o2000`.
@@ -106,7 +106,7 @@ Dusky `--console` and `--batch` modes still load the kernel from host source.
 4. **Transfer**: Jumps to the `entry address` from the directory, which is
    `load + 1 + n1` — the prologue that copies the page-zero words to
    `0o0050` before running.
-5. **COMMAND** prints its own banner (`cvit/Nova COMMAND V0.1`) and the
+5. **COMMAND** prints its own banner (`cvit/Nova COMMAND V0.7`) and the
    `]` prompt. It uses only kernel services for console and disk I/O.
 6. **EOT** (Ctrl-D, `0o004`) at the prompt: COMMAND jumps to the kernel
    quit vector (`0o1003`), which HALTs.

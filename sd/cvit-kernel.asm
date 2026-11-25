@@ -50,7 +50,7 @@ P_PUTS:  DW PUTS
 P_LOADCMD: DW LOADCMD
 
 BANNER:  DW 0o015, 0o012
-         .TXT "cvit/Nova V0.1"
+         .TXT "cvit/Nova V0.7"
          DW 0o015, 0o012, 0
 
 ; WARM: return point for RUN programs (JMP @ to 0o1001).  Reloads

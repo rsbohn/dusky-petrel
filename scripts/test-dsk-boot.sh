@@ -18,14 +18,14 @@ EOF
 "$SIMH_NOVA" "$TMP/simh.ini" </dev/null > "$TMP/simh.out"
 for emulator in dusky simh; do
     tr -d '\r\000' < "$TMP/$emulator.out" > "$TMP/$emulator.clean"
-    for expected in 'cvit/Nova V0.1' 'CVNV READY' 'FOCAL/Nova V0.1' 'Hello from CVIT/Nova!' 'cvit/Nova COMMAND V0.1'; do
+    for expected in 'cvit/Nova V0.7' 'CVNV READY' 'FOCAL/Nova V0.7' 'Hello from CVIT/Nova!' 'cvit/Nova COMMAND V0.7'; do
         if ! grep -Fq "$expected" "$TMP/$emulator.clean"; then
             echo "FAIL: $emulator missing $expected" >&2
             cat "$TMP/$emulator.clean" >&2
             exit 1
         fi
     done
-    if [[ $(grep -Fc 'cvit/Nova COMMAND V0.1' "$TMP/$emulator.clean") -lt 2 ]]; then
+    if [[ $(grep -Fc 'cvit/Nova COMMAND V0.7' "$TMP/$emulator.clean") -lt 2 ]]; then
         echo "FAIL: $emulator did not return from FOCAL" >&2
         exit 1
     fi
@@ -47,7 +47,7 @@ printf 'attach dsk %s/bad-extension.dsk\nboot dsk\nexit\n' "$TMP" > "$TMP/bad-si
 "$SIMH_NOVA" "$TMP/bad-simh.ini" </dev/null > "$TMP/bad-simh.out"
 for emulator in dusky simh; do
     grep -q 'HALT' "$TMP/bad-$emulator.out" || { echo "FAIL: $emulator did not halt on bad extension" >&2; exit 1; }
-    if grep -q 'cvit/Nova V0.1' "$TMP/bad-$emulator.out"; then
+    if grep -q 'cvit/Nova V0.7' "$TMP/bad-$emulator.out"; then
         echo "FAIL: $emulator entered kernel with bad extension" >&2; exit 1
     fi
     echo "PASS: $emulator rejects bad extension"

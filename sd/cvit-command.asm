@@ -810,7 +810,7 @@ PNCH:   STA AC3, PNCHRET
         JMP @PNCHRET
 
 HELLO:   DW 0o015, 0o012
-         .TXT "cvit/Nova COMMAND V0.1"
+         .TXT "cvit/Nova COMMAND V0.7"
          DW 0o015, 0o012, 0
 BADMSG:  DW 0o077
          .TXT "WHAT"

@@ -34,7 +34,7 @@ with open(sys.argv[3], 'w') as output:
 PY
 for emulator in dusky simh; do
     tr -d '\r\000' < "$TMP/$emulator.out" > "$TMP/$emulator.clean"
-    for text in 'FILL8' 'COMMAND' 'HELLO' 'FOCAL' 'Chained hello!' 'FOCAL/Nova V0.1'; do
+    for text in 'FILL8' 'COMMAND' 'HELLO' 'FOCAL' 'Chained hello!' 'FOCAL/Nova V0.7'; do
         if ! grep -Fq "$text" "$TMP/$emulator.clean"; then
             echo "FAIL: $emulator missing $text" >&2
             cat "$TMP/$emulator.clean" >&2
@@ -50,7 +50,7 @@ for emulator in dusky simh; do
         echo "FAIL: $emulator did not flag both duplicate FILL8 entries" >&2
         cat "$TMP/$emulator.clean" >&2; exit 1
     fi
-    if [[ $(grep -Fc 'cvit/Nova COMMAND V0.1' "$TMP/$emulator.clean") -lt 2 ]]; then
+    if [[ $(grep -Fc 'cvit/Nova COMMAND V0.7' "$TMP/$emulator.clean") -lt 2 ]]; then
         echo "FAIL: $emulator did not warm-return from FOCAL" >&2; exit 1
     fi
     echo "PASS: $emulator chained COMMAND boot, CAT, TYPE, RUN and warm return"

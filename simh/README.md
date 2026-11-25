@@ -74,9 +74,9 @@ In SIMH Nova:
 ```
 attach dsk cvit-dsk.img
 load kernel.abs
-go 1000        ; prints "cvit/Nova V0.1", then HALT
+go 1000        ; prints "cvit/Nova V0.7", then HALT
 load command.abs
-go 3000        ; prints "cvit/Nova COMMAND V0.1" and the ] prompt
+go 3000        ; prints "cvit/Nova COMMAND V0.7" and the ] prompt
 ```
 
 Verified 2026-10-28/29: `STA` -> `TC0: CVNV READY`, `CAT` lists the

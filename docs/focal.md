@@ -13,7 +13,7 @@ DEC trademark.
 ```text
 ]RUN FOCAL
 
-FOCAL/Nova V0.1
+FOCAL/Nova V0.7
 *01.10 FOR I=1,5; TYPE %3, I, I^2, !
 *GO
    1   1

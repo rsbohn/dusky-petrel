@@ -3463,7 +3463,7 @@ FLDBUFP:DW 0o70000
 ; =====================================================================
 ; Messages (one char per word, NUL-terminated).
 BANNER: DW 0o015, 0o012
-        .TXT "FOCAL/Nova V0.1"
+        .TXT "FOCAL/Nova V0.7"
         DW 0o015, 0o012, 0
 ERAT:   .TXT " @ "
         DW 0
