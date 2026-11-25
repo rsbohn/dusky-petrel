@@ -131,11 +131,13 @@ import pathlib, struct, sys
 root = pathlib.Path(sys.argv[1])
 original = (root / 'cvit-dsk.img').read_bytes()
 next_free = struct.unpack_from('<H', original, 12)[0]
-# The root is full; both saves should occupy the last slots in block 2.
-# Neither a duplicate nor a full-directory failure should allocate blocks.
+# Both saves occupy the last slots in block 2. A9-B_C.TXT is saved three
+# times in the session: the first save allocates at next_free, and each
+# re-save is a copy-on-write replace allocating a fresh 2-block extent,
+# so the live entry starts at next_free + 4.
 for emu in ('dusky', 'simh'):
     disk = (root / f'{emu}.dsk').read_bytes()
-    block = next_free
+    block = next_free + 4
     for slot, name in enumerate(('A9-B_C.TXT', 'SAVEMPTY'), start=7):
         entry = struct.unpack_from('<12H', disk, 2 * 512 + slot * 24)
         assert struct.pack('>5H', *entry[:5]).decode().rstrip() == name, (emu, entry)
@@ -152,8 +154,15 @@ for emu in ('dusky', 'simh'):
         else:
             assert count > 1 and words[3] == 110, (emu, entry)
         block += count
-    assert struct.unpack_from('<H', disk, 12)[0] == block, emu
-    print(f'PASS: {emu} saved members persisted; rejected saves allocated no blocks')
+    # NOSLOT no longer fails: publication grows the chain by one block.
+    # Its payload is at block, the new directory block at block + 1, and
+    # block 2 link word points at the new block.
+    entry = struct.unpack_from('<12H', disk, (block + 1) * 512)
+    assert struct.pack('>5H', *entry[:5]).decode().rstrip() == 'NOSLOT', (emu, entry)
+    assert (entry[5], entry[6], entry[7], entry[10]) == (2, block, 1, 4), (emu, entry)
+    assert struct.unpack_from('<H', disk, 2 * 512 + 9 * 24 + 12)[0] == block + 1, emu
+    assert struct.unpack_from('<H', disk, 12)[0] == block + 2, emu
+    print(f'PASS: {emu} saved members persisted; CoW and chain growth accounted')
 PY
 fi
 exit $status
