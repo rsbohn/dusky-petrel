@@ -1,6 +1,6 @@
 # CVIT/Nova Filesystem Specification
 
-Status: FINAL DRAFT for Randall's sign-off (reconciled 2026-11-25 against
+Status: SIGNED OFF by Randall Bohn, 2026-11-25 (reconciled 2026-11-25 against
 the shipped code in playa:~/build/dusky-petrel at 7534845 "solid space").
 This draft supersedes the 2026-11-02 read-only draft. Changes from that
 draft are listed under "Reconciliation notes" at the end.
@@ -327,4 +327,4 @@ SIMH; the same image also runs in Dusky.
 
 ## Sign-off
 
-Signed off by Randall Bohn: ______________________  Date: __________
+Signed off by Randall Bohn: x  Date: 2026-11-25
